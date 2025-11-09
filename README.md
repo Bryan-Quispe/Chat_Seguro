@@ -10,7 +10,38 @@ Sistema de mensajería instantánea con salas de chat seguras, autenticación de
 
 ---
 
-## 📋 Tabla de Contenidos
+## � Inicio Rápido para Colaboradores
+
+**¿Primera vez con este proyecto?** 
+
+👉 **[Lee la Guía de Instalación Completa](SETUP_COLABORADORES.md)** - Instrucciones paso a paso para clonar y ejecutar el proyecto en tu máquina.
+
+**TL;DR:**
+```bash
+# 1. Clonar
+git clone https://github.com/cjgranda19/chatapp.git
+cd chatapp
+
+# 2. Backend
+cd backend
+npm install
+cp .env.example .env  # Editar con tus valores
+npm run dev
+
+# 3. Frontend (nueva terminal)
+cd frontend
+npm install
+cp .env.example .env  # Editar con tus valores
+npm run dev
+
+# 4. Abrir http://localhost:5173
+```
+
+**Requisitos:** Node.js 18+, MongoDB 5+
+
+---
+
+## �📋 Tabla de Contenidos
 
 - [Características](#-características)
 - [Arquitectura](#-arquitectura)
