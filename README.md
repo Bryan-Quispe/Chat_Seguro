@@ -14,9 +14,27 @@ Sistema de mensajería instantánea con salas de chat seguras, autenticación de
 
 **¿Primera vez con este proyecto?** 
 
-👉 **[Lee la Guía de Instalación Completa](SETUP_COLABORADORES.md)** - Instrucciones paso a paso para clonar y ejecutar el proyecto en tu máquina.
+👉 **[Lee la Guía de Instalación Completa](SETUP_COLABORADORES.md)** - Instrucciones paso a paso
 
-**TL;DR:**
+### 🐳 Opción 1: Con Docker (MÁS FÁCIL - Recomendado)
+
+No necesitas instalar MongoDB, Node.js ni nada. Solo Docker:
+
+```bash
+# 1. Clonar
+git clone https://github.com/cjgranda19/chatapp.git
+cd chatapp
+
+# 2. Iniciar todo con un comando
+docker-compose up
+
+# 3. Abrir http://localhost:5173
+```
+
+👉 **[Guía Completa de Docker](DOCKER_GUIDE.md)** - Más opciones y comandos
+
+### ⚡ Opción 2: Instalación Local
+
 ```bash
 # 1. Clonar
 git clone https://github.com/cjgranda19/chatapp.git
@@ -37,7 +55,8 @@ npm run dev
 # 4. Abrir http://localhost:5173
 ```
 
-**Requisitos:** Node.js 18+, MongoDB 5+
+**Requisitos Local:** Node.js 18+, MongoDB 5+  
+**Requisitos Docker:** Solo Docker Desktop
 
 ---
 
