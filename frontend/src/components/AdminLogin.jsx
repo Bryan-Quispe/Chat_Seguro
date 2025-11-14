@@ -37,9 +37,6 @@ export default function AdminLogin({ onLogin }) {
         <h2 className="text-2xl font-semibold mb-2 text-center text-gray-700">
           Panel de Administración
         </h2>
-        <p className="text-sm text-center mb-6 text-gray-500">
-          Credenciales predefinidas: admin / admin
-        </p>
 
         <form onSubmit={handleLogin}>
           <input

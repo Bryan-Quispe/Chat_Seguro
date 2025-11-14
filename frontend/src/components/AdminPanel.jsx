@@ -106,10 +106,31 @@ export default function AdminPanel({ onBack }) {
       toast.error("Ingresa un nombre para la sala");
       return;
     }
+    
+    // Validar PIN antes de enviar
+    if (newRoom.pin && newRoom.pin.trim()) {
+      if (newRoom.pin.length !== 4) {
+        toast.error("El PIN debe tener exactamente 4 dígitos");
+        return;
+      }
+      if (!/^\d+$/.test(newRoom.pin)) {
+        toast.error("El PIN solo puede contener números");
+        return;
+      }
+    }
+    
     setLoadingCreate(true);
     try {
       const token = localStorage.getItem("token");
-      await axios.post(`${API_URL}/api/rooms`, newRoom, {
+      // Si el PIN está vacío, no lo enviamos
+      const roomData = { 
+        name: newRoom.name, 
+        type: newRoom.type 
+      };
+      if (newRoom.pin && newRoom.pin.trim()) {
+        roomData.pin = newRoom.pin;
+      }
+      await axios.post(`${API_URL}/api/rooms`, roomData, {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast.success("Sala creada correctamente");
@@ -117,7 +138,14 @@ export default function AdminPanel({ onBack }) {
       setShowCreateForm(false);
       fetchRooms();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Error al crear sala");
+      // Mostrar errores de validación específicos del backend
+      if (err.response?.data?.errors) {
+        err.response.data.errors.forEach(error => {
+          toast.error(error.message);
+        });
+      } else {
+        toast.error(err.response?.data?.message || "Error al crear sala");
+      }
     } finally {
       setLoadingCreate(false);
     }

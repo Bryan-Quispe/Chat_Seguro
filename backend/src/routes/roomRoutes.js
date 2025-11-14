@@ -13,6 +13,7 @@ const router = express.Router();
 // Crear nueva sala
 router.post("/", protectAny, validateCreateRoom, async (req, res) => {
   try {
+    console.log("🔵 POST /api/rooms - Body recibido:", req.body);
     const { name, type, pin } = req.body;
     const roomPin =
       pin && pin.trim() !== "" ? pin : crypto.randomInt(1000, 9999).toString();

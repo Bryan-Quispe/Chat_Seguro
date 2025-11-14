@@ -5,6 +5,7 @@ import validator from "validator";
 export const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.log("❌ Errores de validación:", JSON.stringify(errors.array(), null, 2));
     return res.status(400).json({ 
       message: "Errores de validación", 
       errors: errors.array().map(err => ({
