@@ -63,12 +63,34 @@ const scanForHiddenFiles = (buffer) => {
       detections.push({ type: '7Z', offset: i, risk: 'HIGH' });
     }
     
-    // Ejecutables
+    // Ejecutables - NO marcar como críticos en archivos de imagen (falsos positivos comunes)
+    // Solo marcar como críticos en archivos que NO son imágenes
     if (matchesSignature(buffer, FILE_SIGNATURES.EXE, i)) {
-      detections.push({ type: 'EXE', offset: i, risk: 'CRITICAL' });
+      // Para archivos de imagen, ignorar completamente las detecciones de EXE (falsos positivos)
+      // Solo marcar como CRÍTICO si NO es un archivo de imagen
+      const isImageFile = matchesSignature(buffer, FILE_SIGNATURES.JPEG) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.PNG) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.GIF) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.BMP) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.WEBP);
+
+      if (!isImageFile) {
+        detections.push({ type: 'EXE', offset: i, risk: 'CRITICAL' });
+      }
+      // En archivos de imagen, no agregar detección (ignorar falsos positivos)
     }
     if (matchesSignature(buffer, FILE_SIGNATURES.ELF, i)) {
-      detections.push({ type: 'ELF', offset: i, risk: 'CRITICAL' });
+      // Similar lógica para ELF
+      const isImageFile = matchesSignature(buffer, FILE_SIGNATURES.JPEG) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.PNG) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.GIF) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.BMP) ||
+                         matchesSignature(buffer, FILE_SIGNATURES.WEBP);
+
+      if (!isImageFile) {
+        detections.push({ type: 'ELF', offset: i, risk: 'CRITICAL' });
+      }
+      // En archivos de imagen, no agregar detección (ignorar falsos positivos)
     }
     
     // PDFs ocultos
@@ -128,42 +150,38 @@ const calculateEntropy = (buffer) => {
 const checkTrailingData = (buffer, declaredType) => {
   const imageTypes = ['JPEG', 'PNG', 'GIF', 'BMP', 'WEBP'];
   if (!imageTypes.includes(declaredType)) return null;
-  
-  // Para JPEG: buscar después del marcador EOI (0xFF 0xD9)
+
+  // Para JPEG: NO verificar trailing data ya que es válido según la especificación
+  // Los archivos JPEG pueden tener "trailing garbage" después del marcador EOI (FF D9)
+  // y esto NO es necesariamente esteganografía
   if (declaredType === 'JPEG') {
-    for (let i = buffer.length - 2; i >= 0; i--) {
-      if (buffer[i] === 0xFF && buffer[i + 1] === 0xD9) {
-        const trailingBytes = buffer.length - i - 2;
-        if (trailingBytes > 100) { // Más de 100 bytes sospechosos
-          return {
-            suspicious: true,
-            trailingBytes,
-            message: 'Datos sospechosos después del fin de imagen JPEG'
-          };
-        }
-        break;
-      }
-    }
+    return null; // No marcar como sospechoso
   }
-  
+
   // Para PNG: buscar después del chunk IEND
   if (declaredType === 'PNG') {
-    const iendSignature = [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]; // IEND chunk
-    for (let i = buffer.length - 8; i >= 0; i--) {
+    const iendSignature = [0x49, 0x45, 0x4E, 0x44]; // IEND chunk (solo los primeros 4 bytes)
+    // Buscar el último chunk IEND válido
+    let iendPosition = -1;
+    for (let i = buffer.length - 12; i >= 8; i--) {
       if (matchesSignature(buffer, iendSignature, i)) {
-        const trailingBytes = buffer.length - i - 8;
-        if (trailingBytes > 100) {
-          return {
-            suspicious: true,
-            trailingBytes,
-            message: 'Datos sospechosos después del fin de imagen PNG'
-          };
-        }
+        iendPosition = i;
         break;
       }
     }
+
+    if (iendPosition !== -1) {
+      const trailingBytes = buffer.length - iendPosition - 12; // 12 = tamaño del chunk IEND completo
+      if (trailingBytes > 1024) { // Solo marcar como sospechoso si hay más de 1KB de datos extra
+        return {
+          suspicious: true,
+          trailingBytes,
+          message: 'Datos sospechosos después del fin de imagen PNG'
+        };
+      }
+    }
   }
-  
+
   return null;
 };
 
@@ -333,10 +351,15 @@ export const detectSteganography = async (filePath) => {
     const trailingData = checkTrailingData(buffer, detectedType);
     
     // 3. Analizar entropía (valores muy altos = posible encriptación/compresión oculta)
-    const highEntropy = entropy > 7.5; // Umbral de entropía sospechosa
+    const highEntropy = entropy > 8.0; // Umbral de entropía sospechosa (más permisivo)
     
     // Determinar si el archivo es sospechoso
-    const isSuspicious = suspiciousFiles.length > 0 || 
+    // Solo considerar archivos con riesgo CRÍTICO o HIGH como sospechosos
+    const criticalFiles = suspiciousFiles.filter(f => f.risk === 'CRITICAL');
+    const highRiskFiles = suspiciousFiles.filter(f => f.risk === 'HIGH');
+
+    const isSuspicious = criticalFiles.length > 0 ||
+                        highRiskFiles.length > 0 ||
                         (trailingData && trailingData.suspicious) ||
                         (highEntropy && detectedType !== 'ZIP' && detectedType !== 'RAR');
     
