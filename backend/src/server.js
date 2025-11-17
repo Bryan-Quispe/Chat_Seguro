@@ -8,9 +8,13 @@ import { initializeAdmin } from "./config/initAdmin.js";
 import Message from "./models/Message.js";
 import Room from "./models/Room.js";
 import User from "./models/User.js";
+import UserRoom from "./models/UserRoom.js";
 import roomAdminRoutes from "./routes/roomAdminRoutes.js";
+import { protectAdmin } from "./middleware/authMiddleware.js";
 import { encrypt, decrypt } from "./utils/encryption.js";
 import { secureLog, errorLog, systemLog } from "./utils/logger.js";
+import { sanitizeString } from './utils/sanitizer.js';
+import mongoose from 'mongoose';
 
 dotenv.config();
 
@@ -87,11 +91,65 @@ setInterval(() => {
   }
 }, CHECK_INTERVAL);
 
+// Endpoint para obtener usuarios activos de una sala (solo admin)
+app.get("/api/admin/rooms/:id/active", protectAdmin, (req, res) => {
+  try {
+    const roomId = req.params.id;
+    const users = activeUsers[roomId] || [];
+    // devolver solo nickname y socketId para consumo
+    res.json(users.map(u => ({ nickname: u.nickname, socketId: u.socketId })));
+  } catch (err) {
+    console.error("Error en endpoint active users:", err);
+    res.status(500).json({ message: "Error al obtener usuarios activos" });
+  }
+});
+
+// Endpoint combinado: participantes históricos + estado online (solo admin)
+app.get("/api/admin/rooms/:id/participants/summary", protectAdmin, async (req, res) => {
+  try {
+    const roomId = req.params.id;
+    // históricos desde DB
+    const historical = await UserRoom.find({ room: roomId }).select("nickname joinedAt -_id");
+    const active = activeUsers[roomId] || [];
+
+    // mapear por nickname para unificar (historical puede tener duplicados teóricos)
+    const map = new Map();
+    historical.forEach(h => {
+      map.set(h.nickname, { nickname: h.nickname, joinedAt: h.joinedAt, online: false });
+    });
+
+    active.forEach(a => {
+      if (map.has(a.nickname)) {
+        const item = map.get(a.nickname);
+        item.online = true;
+        map.set(a.nickname, item);
+      } else {
+        map.set(a.nickname, { nickname: a.nickname, joinedAt: null, online: true });
+      }
+    });
+
+    const participants = Array.from(map.values());
+    const counts = {
+      historical: historical.length,
+      active: active.length,
+      unique: participants.length,
+    };
+
+    res.json({ participants, counts });
+  } catch (err) {
+    console.error("Error en participants summary:", err);
+    res.status(500).json({ message: "Error al obtener resumen de participantes" });
+  }
+});
+
 io.on("connection", (socket) => {
   console.log("🟢 Usuario conectado:", socket.id);
 
   // Unirse a sala
-  socket.on("joinRoom", async ({ pin, nickname }) => {
+  socket.on("joinRoom", async (payload) => {
+    // Sanitize socket payload
+    const pin = sanitizeString(payload?.pin);
+    const nickname = sanitizeString(payload?.nickname);
     try {
       const room = await Room.findOne({ pin });
       if (!room) {
@@ -211,6 +269,19 @@ io.on("connection", (socket) => {
       // Ahora sí, añadir el usuario con el nuevo socketId
       activeUsers[roomId].push({ nickname, socketId: socket.id });
 
+      // Registrar histórico de participante (crear si no existe)
+      try {
+        await UserRoom.findOneAndUpdate(
+          { nickname, room: room._id },
+          { $setOnInsert: { joinedAt: new Date() } },
+          { upsert: true }
+        );
+        secureLog("📥", "UserRoom upserted", { nickname, roomId });
+      } catch (e) {
+        // No bloquear la unión si falla el registro histórico
+        errorLog("Error registrando UserRoom", e, { nickname, roomId });
+      }
+
       // Emitir mensaje de bienvenida
       io.to(roomId).emit("systemMessage", {
         content: ` ${nickname} se unió a la sala`,
@@ -230,7 +301,14 @@ io.on("connection", (socket) => {
   });
 
   // Enviar mensaje o archivo
-  socket.on("sendMessage", async ({ roomId, sender, content, type, fileName, messageId }) => {
+  socket.on("sendMessage", async (payload) => {
+    // Sanitize incoming payload
+    const roomId = sanitizeString(payload?.roomId);
+    const sender = sanitizeString(payload?.sender);
+    const content = typeof payload?.content === 'string' ? sanitizeString(payload.content) : payload?.content;
+    const type = sanitizeString(payload?.type) || payload?.type;
+    const fileName = sanitizeString(payload?.fileName);
+    const messageId = sanitizeString(payload?.messageId) || payload?.messageId;
     // Log sin datos sensibles
     console.log("📩 Mensaje recibido - Tipo:", type, "- Sala:", roomId);
     try {
@@ -267,6 +345,13 @@ io.on("connection", (socket) => {
       app.use("/api/admin/rooms", roomAdminRoutes);
 
       // Si es mensaje de texto normal, guardarlo (se encriptará automáticamente)
+      // Validate roomId to prevent NoSQL injection via crafted payloads
+      const ObjectId = mongoose.Types.ObjectId;
+      if (!ObjectId.isValid(roomId)) {
+        socket.emit("errorMessage", "ID de sala inválido");
+        return;
+      }
+
       const message = new Message({ room: roomId, sender, content, type: type || "text" });
       await message.save();
 
@@ -288,7 +373,11 @@ io.on("connection", (socket) => {
   });
 
   // Eliminar mensaje
-  socket.on("deleteMessage", async ({ messageId, roomId, nickname, isAdmin }) => {
+  socket.on("deleteMessage", async (payload) => {
+    const messageId = sanitizeString(payload?.messageId) || payload?.messageId;
+    const roomId = sanitizeString(payload?.roomId);
+    const nickname = sanitizeString(payload?.nickname);
+    const isAdmin = payload?.isAdmin;
     try {
       const message = await Message.findById(messageId);
       if (!message) {
@@ -324,7 +413,10 @@ io.on("connection", (socket) => {
   });
 
   // Evento de edición de mensaje
-  socket.on("editMessage", async ({ messageId, newContent, roomId }) => {
+  socket.on("editMessage", async (payload) => {
+    const messageId = sanitizeString(payload?.messageId) || payload?.messageId;
+    const newContent = sanitizeString(payload?.newContent);
+    const roomId = sanitizeString(payload?.roomId);
     try {
       const message = await Message.findById(messageId);
       if (!message) {
@@ -349,7 +441,10 @@ io.on("connection", (socket) => {
   });
 
   // Expulsar usuario (solo admin)
-  socket.on("kickUser", async ({ roomId, targetNickname, adminNickname }) => {
+  socket.on("kickUser", async (payload) => {
+    const roomId = sanitizeString(payload?.roomId);
+    const targetNickname = sanitizeString(payload?.targetNickname);
+    const adminNickname = sanitizeString(payload?.adminNickname);
     try {
       const room = await Room.findById(roomId);
       if (!room) {
@@ -415,7 +510,8 @@ io.on("connection", (socket) => {
   });
 
   // ✅ Ping para mantener actividad (heartbeat)
-  socket.on("userActivity", ({ nickname }) => {
+  socket.on("userActivity", (payload) => {
+    const nickname = sanitizeString(payload?.nickname);
     if (userSessions[nickname]) {
       userSessions[nickname].lastActivity = Date.now();
     }
@@ -453,6 +549,31 @@ io.on("connection", (socket) => {
         });
         io.to(roomId).emit("activeUsersUpdate", activeUsers[roomId] || []);
       }
+    }
+  });
+
+  // Evento para salir voluntariamente de una sala
+  socket.on("leaveRoom", (payload) => {
+    const roomId = sanitizeString(payload?.roomId);
+    const nickname = sanitizeString(payload?.nickname);
+    try {
+      // Remover de activeUsers
+      if (activeUsers[roomId]) {
+        activeUsers[roomId] = activeUsers[roomId].filter(u => u.nickname !== nickname);
+        io.to(roomId).emit("activeUsersUpdate", activeUsers[roomId] || []);
+      }
+
+      // Limpiar session
+      if (userSessions[nickname] && userSessions[nickname].socketId === socket.id) {
+        delete userSessions[nickname];
+      }
+
+      // Hacer que socket salga de la sala
+      socket.leave(roomId);
+
+      secureLog("↩️", "Usuario salió voluntariamente de sala", { nickname, roomId });
+    } catch (err) {
+      errorLog("Error en leaveRoom", err, { nickname, roomId });
     }
   });
 });

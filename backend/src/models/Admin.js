@@ -5,6 +5,10 @@ const adminSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
+  // 2FA fields (TOTP)
+  totpSecret: { type: String, default: null },
+  totpTempSecret: { type: String, default: null }, // used during setup until confirmed
+  totpEnabled: { type: Boolean, default: false },
 });
 
 adminSchema.pre("save", async function (next) {

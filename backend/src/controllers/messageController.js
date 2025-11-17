@@ -2,7 +2,46 @@ import Message from "../models/Message.js";
 import { errorLog } from "../utils/logger.js";
 import Room from "../models/Room.js";
 import User from "../models/User.js";
+import UserRoom from "../models/UserRoom.js";
 import { encrypt, decrypt } from "../utils/encryption.js";
+import { sanitizeString } from "../utils/sanitizer.js";
+
+// Obtener mensajes de una sala con control de roles
+export const getRoomMessages = async (req, res) => {
+  try {
+    const { roomId } = req.params;
+    const messages = await Message.find({ room: roomId }).sort({ timestamp: 1 });
+
+    // Si el requester es admin (no tiene 'username' en el objeto), devolver mensajes sin contenido
+    const isAdmin = !req.user || !req.user.username;
+
+    if (isAdmin) {
+      const redacted = messages.map((msg) => ({
+        _id: msg._id,
+        room: msg.room,
+        sender: decrypt(msg.sender),
+        type: msg.type,
+        fileUrl: msg.fileUrl,
+        edited: msg.edited,
+        timestamp: msg.timestamp,
+      }));
+
+      // Obtener participantes (nicknames) para la sala
+      const participantsDocs = await UserRoom.find({ room: roomId }).select("nickname -_id");
+      const participants = participantsDocs.map((p) => p.nickname);
+
+      return res.json({ messages: redacted, participants });
+    }
+
+    // Usuario normal: devolver mensajes desencriptados completos (mantener formato anterior: array)
+    const decryptedMessages = Message.decryptMessages(messages);
+    return res.json(decryptedMessages);
+  } catch (err) {
+    errorLog("Error obteniendo mensajes", err, { roomId: req.params.roomId });
+    res.status(500).json({ message: "Error al obtener mensajes" });
+  }
+};
+
 
 // 🔹 Eliminar mensaje (solo admin o autor)
 export const deleteMessage = async (req, res) => {
@@ -66,7 +105,8 @@ export const editMessage = async (req, res) => {
     if (!userId)
       return res.status(401).json({ message: "Usuario no autenticado" });
 
-    if (!content || !content.trim())
+    const safeContent = sanitizeString(content || '');
+    if (!safeContent || !safeContent.trim())
       return res.status(400).json({ message: "El contenido no puede estar vacío" });
 
     // Buscar mensaje
@@ -90,7 +130,7 @@ export const editMessage = async (req, res) => {
       return res.status(403).json({ message: "Solo puedes editar tus propios mensajes" });
 
     // Actualizar mensaje (se encriptará automáticamente)
-    message.content = content.trim();
+    message.content = safeContent.trim();
     message.edited = true;
     await message.save();
 

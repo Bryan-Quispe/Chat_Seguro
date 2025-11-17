@@ -40,9 +40,9 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Límite de tamaño (50 MB)
+// Límite de tamaño (10 MB) - ajustado por requisitos de la app
 export const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
 });

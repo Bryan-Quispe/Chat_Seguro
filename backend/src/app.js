@@ -11,13 +11,19 @@ import roomRoutes from "./routes/roomRoutes.js";
 import path from "path";
 import authRoutes from "./routes/authRoutes.js";
 import roomAdminRoutes from "./routes/roomAdminRoutes.js";
+import { sanitizeObject } from './utils/sanitizer.js';
 
 dotenv.config();
 
 const app = express();
 
 // 🛡️ Configuración de CORS (debe ir PRIMERO)
-const allowedOrigins = process.env.CLIENT_ORIGIN.split(',').map(origin => origin.trim());
+// Proteger contra ausencia o formato inesperado de la variable de entorno
+const rawClientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+const allowedOrigins = rawClientOrigin
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
@@ -53,6 +59,18 @@ app.use(helmet({
 // Limitar tamaño de payload para prevenir ataques DoS
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Sanitizar entrantes para mitigar XSS/NoSQL injection (capa ligera)
+app.use((req, res, next) => {
+  try {
+    if (req.body) req.body = sanitizeObject(req.body);
+    if (req.params) req.params = sanitizeObject(req.params);
+    if (req.query) req.query = sanitizeObject(req.query);
+  } catch (e) {
+    // no bloquear por errores de sanitización
+  }
+  next();
+});
 
 // Ruta de prueba
 app.get("/", (req, res) => {

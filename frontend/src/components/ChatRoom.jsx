@@ -6,6 +6,11 @@ import toast from "react-hot-toast";
 import "./ChatRoom.css";
 
 export default function ChatRoom({ roomId, pin, nickname, onBack }) {
+  // Support restoring session from localStorage on reload
+  const [currentRoomId, setCurrentRoomId] = useState(roomId || localStorage.getItem("roomId"));
+  const [currentPin, setCurrentPin] = useState(pin || localStorage.getItem("roomPin"));
+  const [currentNickname, setCurrentNickname] = useState(nickname || localStorage.getItem("nickname"));
+
   const [messages, setMessages] = useState([]);
   const [systemMessages, setSystemMessages] = useState([]);
   const [message, setMessage] = useState("");
@@ -20,11 +25,31 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
   const [editingMessage, setEditingMessage] = useState({ id: null, content: "" });
   const [isKicked, setIsKicked] = useState(false);
   const [disconnectReason, setDisconnectReason] = useState("");
+  const [preview, setPreview] = useState(null); // { url, fileName }
+  const [downloadConfirm, setDownloadConfirm] = useState(null); // { url, fileName }
   const messagesEndRef = useRef(null);
+  const [lastActivityTs, setLastActivityTs] = useState(Date.now());
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const [inactivityCountdown, setInactivityCountdown] = useState(0);
+  const inactivityWarnRef = useRef(null);
+  const inactivityLogoutRef = useRef(null);
+  const INACTIVITY_LIMIT = 5 * 60; // seconds
+  const WARNING_BEFORE = 30; // seconds
+
 
   useEffect(() => {
-    if (!joined && roomId && pin && nickname) {
-      socket.emit("joinRoom", { pin, nickname });
+    // If props were passed, keep state in sync
+    if (roomId && roomId !== currentRoomId) setCurrentRoomId(roomId);
+    if (pin && pin !== currentPin) setCurrentPin(pin);
+    if (nickname && nickname !== currentNickname) setCurrentNickname(nickname);
+
+    if (!joined && currentRoomId && currentPin && currentNickname) {
+      socket.emit("joinRoom", { pin: currentPin, nickname: currentNickname });
+      // persist to localStorage so reload restores session
+      localStorage.setItem("roomId", currentRoomId);
+      localStorage.setItem("roomPin", currentPin);
+      localStorage.setItem("nickname", currentNickname);
+
       fetchRoomData();
       fetchHistory();
       setJoined(true);
@@ -32,29 +57,89 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
 
     // ✅ Enviar ping de actividad cada 2 minutos
     const activityInterval = setInterval(() => {
-      if (joined && nickname) {
-        socket.emit("userActivity", { nickname });
+      if (joined && currentNickname) {
+        socket.emit("userActivity", { nickname: currentNickname });
       }
     }, 2 * 60 * 1000); // 2 minutos
 
     return () => clearInterval(activityInterval);
-  }, [roomId, pin, nickname, joined]);
+  }, [currentRoomId, currentPin, currentNickname, joined]);
+
+  // ---- Inactividad: advertencia y logout ----
+  useEffect(() => {
+    // reset timers
+    const resetTimers = () => {
+      // clear existing
+      if (inactivityWarnRef.current) clearTimeout(inactivityWarnRef.current);
+      if (inactivityLogoutRef.current) clearTimeout(inactivityLogoutRef.current);
+
+      const warnDelay = (INACTIVITY_LIMIT - WARNING_BEFORE) * 1000;
+      const logoutDelay = INACTIVITY_LIMIT * 1000;
+
+      inactivityWarnRef.current = setTimeout(() => {
+        setShowInactivityWarning(true);
+        setInactivityCountdown(WARNING_BEFORE);
+        // start countdown interval
+        const tick = setInterval(() => {
+          setInactivityCountdown((c) => {
+            if (c <= 1) {
+              clearInterval(tick);
+            }
+            return c - 1;
+          });
+        }, 1000);
+      }, warnDelay);
+
+        inactivityLogoutRef.current = setTimeout(() => {
+        // Forzar desconexión
+        setShowInactivityWarning(false);
+        setIsKicked(true);
+        setDisconnectReason("inactividad");
+          socket.emit("userActivity", { nickname: currentNickname }); // último intento
+          handleBack();
+        }, logoutDelay);
+    };
+
+    resetTimers();
+
+    // Activity events: mousemove, keydown, touchstart
+    const activityHandler = () => {
+      setLastActivityTs(Date.now());
+      setShowInactivityWarning(false);
+      setInactivityCountdown(0);
+      socket.emit("userActivity", { nickname: currentNickname });
+      resetTimers();
+    };
+
+    window.addEventListener("mousemove", activityHandler);
+    window.addEventListener("keydown", activityHandler);
+    window.addEventListener("touchstart", activityHandler);
+
+    return () => {
+      if (inactivityWarnRef.current) clearTimeout(inactivityWarnRef.current);
+      if (inactivityLogoutRef.current) clearTimeout(inactivityLogoutRef.current);
+      window.removeEventListener("mousemove", activityHandler);
+      window.removeEventListener("keydown", activityHandler);
+      window.removeEventListener("touchstart", activityHandler);
+    };
+  }, [currentNickname, onBack]);
 
   // 🔹 Obtener tipo de sala
   const fetchRoomData = async () => {
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`${API_URL}/api/rooms/${roomId}`, {
+      const res = await axios.get(`${API_URL}/api/rooms/${currentRoomId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const room = res.data;
       console.log("Sala cargada:", room);
       setRoomType(room.type || "standard");
       
+      
       // Verificar si el usuario actual es el creador de la sala
       if (room.createdBy) {
         // Si createdBy es un objeto con username
-        if (room.createdBy.username === nickname) {
+        if (room.createdBy.username === currentNickname) {
           setIsAdmin(true);
           console.log("Usuario es admin de la sala");
         }
@@ -74,10 +159,36 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
 
   const fetchHistory = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/messages/room/${roomId}`);
-      setMessages(res.data);
+      const token = localStorage.getItem("token");
+      const res = await axios.get(`${API_URL}/api/messages/room/${currentRoomId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+
+      // La API puede devolver dos formatos:
+      // - Array (usuarios normales): array de mensajes desencriptados
+      // - Objeto (admins): { messages: [...], participants: [...] }
+      const data = res.data;
+      if (Array.isArray(data)) {
+        setMessages(data);
+      } else if (data && data.messages) {
+        setMessages(data.messages);
+        if (Array.isArray(data.participants)) {
+          // data.participants puede venir como array de nicknames o de objetos
+          const parts = data.participants.map(p => (p.nickname ? p.nickname : p));
+          setParticipants(parts);
+        }
+        setIsAdmin(true);
+      } else {
+        // Fallback
+        setMessages([]);
+      }
     } catch (err) {
       console.error("Error al cargar historial:", err);
+      // Si token inválido, notificar y forzar logout local
+      if (err.response?.status === 401) {
+        toast.error("No autorizado al obtener historial. Por favor inicia sesión nuevamente.");
+        localStorage.removeItem("token");
+      }
     }
   };
 
@@ -85,7 +196,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
   const sendMessage = () => {
     if (message.trim() === "" || isKicked) return;
 
-    socket.emit("sendMessage", { roomId, sender: nickname, content: message });
+    socket.emit("sendMessage", { roomId: currentRoomId, sender: currentNickname, content: message });
     setMessage("");
   };
 
@@ -99,7 +210,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     const file = e.target.files[0];
     if (!file) return;
     
-    if (!roomId || !nickname) {
+    if (!currentRoomId || !currentNickname) {
       toast.error("No se ha identificado la sala o el usuario");
       return;
     }
@@ -110,10 +221,34 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       return;
     }
 
+    // Validación cliente: extensiones permitidas y tamaño máximo 10 MB
+    const allowedExts = [
+      ".jpg", ".jpeg", ".png", ".gif", ".webp",
+      ".mp3", ".wav", ".ogg",
+      ".mp4", ".webm",
+      // Documentos y comprimidos permitidos por backend
+      ".pdf", ".doc", ".docx", ".zip", ".rar", ".7z"
+    ];
+    const maxSizeBytes = 10 * 1024 * 1024; // 10 MB
+    const name = file.name || "";
+    const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+
+    if (!allowedExts.includes(ext)) {
+      toast.error(`Tipo de archivo no permitido: ${ext}. Tipos permitidos: ${allowedExts.join(', ')}`, { id: "upload" });
+      e.target.value = "";
+      return;
+    }
+
+    if (file.size > maxSizeBytes) {
+      toast.error(`El archivo excede el tamaño máximo de 10 MB. Tamaño: ${(file.size / (1024*1024)).toFixed(2)} MB`, { id: "upload" });
+      e.target.value = "";
+      return;
+    }
+
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("roomId", roomId);
-    formData.append("sender", nickname);
+    formData.append("roomId", currentRoomId);
+    formData.append("sender", currentNickname);
 
     // Mostrar loading
     toast.loading("Subiendo archivo...", { id: "upload" });
@@ -130,10 +265,26 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       const { fileUrl, messageId, fileName } = res.data;
       console.log("📎 Archivo subido:", fileUrl);
 
+      // Añadir mensaje optimista localmente para que el uploader vea la preview inmediatamente
+      try {
+          const optimisticMsg = {
+            _id: messageId,
+            sender: currentNickname,
+            content: `${API_URL}${fileUrl}`,
+            type: "file",
+            timestamp: new Date().toISOString(),
+            fileName: fileName || file.name,
+            optimistic: true,
+          };
+          setMessages((prev) => [...prev, optimisticMsg]);
+      } catch (e) {
+        console.warn('No se pudo añadir optimistc message localmente', e);
+      }
+
       // Solo emitir el mensaje - el socket lo agregará a la UI automáticamente
       socket.emit("sendMessage", {
-        roomId,
-        sender: nickname,
+        roomId: currentRoomId,
+        sender: currentNickname,
         content: `${API_URL}${fileUrl}`,
         type: "file",
         fileName: fileName || file.name,
@@ -199,7 +350,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       });
       
       // Emitir evento para actualizar a otros usuarios
-      socket.emit("deleteMessage", { messageId: id, roomId, nickname, isAdmin });
+      socket.emit("deleteMessage", { messageId: id, roomId: currentRoomId, nickname: currentNickname, isAdmin });
       toast.success("Mensaje eliminado");
     } catch (err) {
       console.error("Error al eliminar mensaje:", err);
@@ -253,7 +404,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       // Emitir evento para actualizar a otros usuarios
       socket.emit("editMessage", {
         messageId: editingMessage.id,
-        roomId,
+        roomId: currentRoomId,
         newContent: editingMessage.content,
       });
 
@@ -271,6 +422,41 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     setEditingMessage({ id: null, content: "" });
   };
 
+  // Cleanup and navigate back: clear stored session and remove listeners
+  const handleBack = () => {
+    try {
+      localStorage.removeItem("roomId");
+      localStorage.removeItem("roomPin");
+      localStorage.removeItem("nickname");
+    } catch (e) {
+      // ignore
+    }
+
+    // Notify server we're leaving the room (best-effort)
+    try {
+      socket.emit("leaveRoom", { roomId: currentRoomId, nickname: currentNickname });
+    } catch (e) {
+      // ignore
+    }
+
+    // Remove listeners registered by this component
+    socket.off("newMessage");
+    socket.off("messageDeleted");
+    socket.off("messageEdited");
+    socket.off("systemMessage");
+    socket.off("activeUsersUpdate");
+    socket.off("kicked");
+    socket.off("sessionReplaced");
+    socket.off("inactivityDisconnect");
+
+    // Clear inactivity timers
+    if (inactivityWarnRef.current) clearTimeout(inactivityWarnRef.current);
+    if (inactivityLogoutRef.current) clearTimeout(inactivityLogoutRef.current);
+
+    // Finally call parent callback to navigate back
+    onBack && onBack();
+  };
+
   // Expulsar usuario (solo admin)
   const handleKickUser = (targetNickname) => {
     if (!isAdmin) {
@@ -279,7 +465,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     }
 
     if (window.confirm(`¿Expulsar a ${targetNickname} de la sala?`)) {
-      socket.emit("kickUser", { roomId, targetNickname, adminNickname: nickname });
+      socket.emit("kickUser", { roomId: currentRoomId, targetNickname, adminNickname: currentNickname });
       toast.success(`${targetNickname} ha sido expulsado de la sala`);
     }
   };
@@ -289,7 +475,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     e.preventDefault();
     
     // Solo mostrar menú si es tu mensaje o eres admin, y no está eliminado
-    if ((msg.sender === nickname || isAdmin) && msg.type !== "deleted") {
+    if ((msg.sender === currentNickname || isAdmin) && msg.type !== "deleted") {
       // Dimensiones aproximadas del menú contextual
       const menuWidth = 200;
       const menuHeight = 100; // Altura aproximada con 2 opciones
@@ -325,6 +511,18 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     setContextMenu({ show: false, x: 0, y: 0, messageId: null, message: null });
   };
 
+  // Mark image as corrupt when it fails to load
+  const handleImageError = (messageId) => {
+    if (!messageId) return;
+    setMessages(prev => prev.map(m => m._id && m._id.toString() === messageId.toString() ? { ...m, corrupt: true } : m));
+    toast.error('Imagen corrupta o no disponible');
+  };
+
+  const handleImageLoad = (messageId) => {
+    if (!messageId) return;
+    setMessages(prev => prev.map(m => m._id && m._id.toString() === messageId.toString() ? { ...m, corrupt: false } : m));
+  };
+
   // Click en cualquier parte cierra el menú
   useEffect(() => {
     const handleClick = () => closeContextMenu();
@@ -337,7 +535,28 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
   useEffect(() => {
     socket.on("newMessage", (data) => {
       console.log("🟢 Nuevo mensaje recibido:", data);
-      setMessages((prev) => [...prev, data]);
+      // Reemplazar mensaje optimista por la versión final si existe
+      setMessages((prev) => {
+        if (!data || !data._id) return prev;
+        const idx = prev.findIndex(m => m._id && m._id.toString() === data._id.toString());
+        if (idx !== -1) {
+          const existing = prev[idx];
+          // Si el existente es optimista lo reemplazamos por el mensaje real
+          if (existing.optimistic) {
+            const finalMsg = {
+              ...data,
+              // Mantener fileName si el backend no lo incluyó
+              fileName: data.fileName || existing.fileName,
+            };
+            const next = [...prev];
+            next[idx] = finalMsg;
+            return next;
+          }
+          // Si ya existe y no es optimista, no duplicar
+          return prev;
+        }
+        return [...prev, data];
+      });
     });
 
     socket.on("messageDeleted", ({ id, newContent }) => {
@@ -393,10 +612,19 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       // Forzar redirección inmediata
       const timer = setTimeout(() => {
         console.log("⬅️ Redirigiendo al dashboard...");
-        onBack();
+        handleBack();
       }, 3000);
       
       return () => clearTimeout(timer);
+    });
+
+    // Mostrar alerta de inactividad si aplica (actualiza estado local si countdown llega a 0)
+    socket.on("inactivityDisconnect", ({ message }) => {
+      setIsKicked(true);
+      setDisconnectReason("inactividad");
+      setShowInactivityWarning(false);
+      toast.error(message, { duration: 5000 });
+      setTimeout(() => handleBack(), 3000);
     });
 
     // ✅ Sesión reemplazada por otro dispositivo
@@ -406,7 +634,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       setDisconnectReason("sesión reemplazada");
       toast.error(message, { duration: 5000 });
       setTimeout(() => {
-        onBack();
+        handleBack();
       }, 3000);
     });
 
@@ -417,7 +645,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       setDisconnectReason("inactividad");
       toast.error(message, { duration: 5000 });
       setTimeout(() => {
-        onBack();
+        handleBack();
       }, 3000);
     });
 
@@ -431,7 +659,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
       socket.off("sessionReplaced");
       socket.off("inactivityDisconnect");
     };
-  }, [onBack]);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -444,53 +672,97 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
     }
 
     // Si es archivo
-    if (msg.type === "file" || msg.content?.match(/\.(jpg|jpeg|png|gif|mp4|pdf|webm|doc|docx|xls|xlsx|zip|rar)$/i)) {
+    if (msg.type === "file" || msg.content?.match(/\.(jpg|jpeg|png|gif|mp4|pdf|webm|doc|docx|xls|xlsx|zip|rar|webp)$/i)) {
       const fileName = msg.fileName || msg.content.split('/').pop();
-      
+
       // Imágenes
       if (msg.content.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        const src = msg.content.startsWith('http') ? msg.content : `${API_URL}${msg.content}`;
+        // Si la imagen fue marcada como corrupta, mostrar placeholder
+        if (msg.corrupt) {
+          return (
+            <div className="file-message image-message corrupted">
+              <div className="image-placeholder">Imagen corrupta o no disponible</div>
+              <div className="file-name">{fileName}</div>
+            </div>
+          );
+        }
+
         return (
           <div className="file-message image-message">
-            <img src={msg.content} alt={fileName} className="chat-image" />
-            <div className="file-name">{fileName}</div>
+            <div className="image-wrapper">
+              <img
+                src={src}
+                alt={fileName}
+                className="chat-image"
+                onClick={() => setPreview({ url: src, fileName })}
+                onError={() => handleImageError(msg._id)}
+                onLoad={() => handleImageLoad(msg._id)}
+                style={{ cursor: 'pointer' }}
+              />
+              <div className="image-overlay">
+                <button
+                  className="overlay-btn"
+                  title="Ver imagen"
+                  onClick={() => setPreview({ url: src, fileName })}
+                >🔍</button>
+                <button
+                  className="overlay-btn"
+                  title="Descargar imagen"
+                  onClick={() => setDownloadConfirm({ url: src, fileName })}
+                >⬇️</button>
+              </div>
+            </div>
+            <div className="file-name">
+              {fileName}
+            </div>
           </div>
         );
       }
-      
+
       // Videos
       if (msg.content.match(/\.(mp4|webm|mov)$/i)) {
+        const src = msg.content.startsWith('http') ? msg.content : `${API_URL}${msg.content}`;
         return (
           <div className="file-message video-message">
             <video controls className="chat-video">
-              <source src={msg.content} type="video/mp4" />
+              <source src={src} type="video/mp4" />
             </video>
-            <div className="file-name">{fileName}</div>
+            <div className="file-name">{fileName}
+              <button className="download-icon" title="Descargar video" onClick={() => setDownloadConfirm({ url: src, fileName })}>⬇️</button>
+            </div>
           </div>
         );
       }
-      
+
       // PDFs
       if (msg.content.match(/\.pdf$/i)) {
+        const src = msg.content.startsWith('http') ? msg.content : `${API_URL}${msg.content}`;
         return (
-          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="file-message pdf-message">
-            <div className="file-icon">📄</div>
-            <div className="file-info">
-              <div className="file-name">{fileName}</div>
-              <div className="file-action">Abrir PDF</div>
-            </div>
-          </a>
+          <div className="file-message pdf-message">
+            <a href={src} target="_blank" rel="noopener noreferrer" className="pdf-link">
+              <div className="file-icon">📄</div>
+              <div className="file-info">
+                <div className="file-name">{fileName}</div>
+                <div className="file-action">Abrir PDF</div>
+              </div>
+            </a>
+            <button className="download-icon" title="Descargar PDF" onClick={() => setDownloadConfirm({ url: src, fileName })}>⬇️</button>
+          </div>
         );
       }
-      
+
       // Otros archivos
+      const src = msg.content.startsWith('http') ? msg.content : `${API_URL}${msg.content}`;
       return (
-        <a href={msg.content} download target="_blank" rel="noopener noreferrer" className="file-message other-file">
+        <div className="file-message other-file">
           <div className="file-icon">📎</div>
           <div className="file-info">
             <div className="file-name">{fileName}</div>
-            <div className="file-action">Descargar</div>
+            <div className="file-action">{/* mostrar nombre y acción */}</div>
           </div>
-        </a>
+          <button className="download-icon" title="Descargar archivo" onClick={() => setDownloadConfirm({ url: src, fileName })}>⬇️</button>
+        </div>
       );
     }
     
@@ -526,19 +798,122 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
           </div>
         </div>
       )}
+      {/* Modal de vista previa de imagen */}
+      {preview && (
+        <div className="modal-overlay" onClick={() => setPreview(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <img src={preview.url} alt={preview.fileName} style={{ maxWidth: '90vw', maxHeight: '70vh' }} />
+            <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button className="cancel-btn" onClick={() => setPreview(null)}>Cerrar</button>
+              <button className="save-btn" onClick={() => setDownloadConfirm(preview)}>Descargar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmación de descarga */}
+      {downloadConfirm && (
+        <div className="modal-overlay" onClick={() => setDownloadConfirm(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Descargar archivo</h3>
+            <p>Se descargará <strong>{downloadConfirm.fileName}</strong>. ¿Deseas continuar?</p>
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setDownloadConfirm(null)}>Cancelar</button>
+              <button className="btn-confirm" onClick={async () => {
+                // Iniciar descarga mediante fetch para soportar cross-origin correctamente
+                try {
+                  const resp = await fetch(downloadConfirm.url, { credentials: 'include' });
+                  if (!resp.ok) throw new Error('Network response was not ok');
+
+                  // Para feedback de progreso usamos el stream
+                  const contentLength = resp.headers.get('Content-Length');
+                  if (!resp.body) throw new Error('ReadableStream no disponible');
+
+                  const total = contentLength ? parseInt(contentLength, 10) : null;
+                  const reader = resp.body.getReader();
+                  let received = 0;
+                  const chunks = [];
+
+                  // Mostrar toast con progreso inicial
+                  const progressId = toast.loading('Descargando... 0%', { id: 'download-progress', duration: Infinity });
+
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    if (total) {
+                      const pct = Math.round((received / total) * 100);
+                      toast.loading(`Descargando... ${pct}%`, { id: 'download-progress', duration: Infinity });
+                    }
+                  }
+
+                  // Combinar chunks
+                  const blob = new Blob(chunks);
+                  const blobUrl = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = blobUrl;
+                  a.download = downloadConfirm.fileName || '';
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  URL.revokeObjectURL(blobUrl);
+                  toast.success('Descarga completada', { id: 'download-progress' });
+
+                  // Registrar descarga en backend (auditoría)
+                  try {
+                    const token = localStorage.getItem('token');
+                    await axios.post(`${API_URL}/api/files/downloaded`, {
+                      originalName: downloadConfirm.fileName,
+                      storedFilename: downloadConfirm.fileName,
+                      url: downloadConfirm.url,
+                      mimetype: resp.headers.get('Content-Type') || undefined,
+                      room: currentRoomId,
+                      downloader: currentNickname
+                    }, {
+                      headers: token ? { Authorization: `Bearer ${token}` } : {}
+                    });
+                  } catch (logErr) {
+                    console.error('Error registrando descarga', logErr);
+                  }
+
+                } catch (e) {
+                  console.error('Download error', e);
+                  toast.error('No se pudo iniciar la descarga');
+                }
+                setDownloadConfirm(null);
+              }}>Descargar</button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="chat-header">
         <div>
           <h2>{isAdmin ? " Administrador" : "Chat de Sala"}</h2>
-          <p>{nickname}</p>
+          <p>{currentNickname}</p>
         </div>
         <div className="chat-actions">
           <button className="btn-outline" onClick={() => setShowPanel(!showPanel)}>
             👥 Participantes
           </button>
-          <button className="btn-danger" onClick={onBack}>Salir</button>
+          <button className="btn-danger" onClick={handleBack}>Salir</button>
         </div>
       </div>
+
+      {/* Modal de advertencia por inactividad */}
+      {showInactivityWarning && (
+        <div className="modal-overlay" onClick={() => setShowInactivityWarning(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>⏰ Sesión por expirar</h3>
+            <p>Tu sesión expirará en <strong>{inactivityCountdown}s</strong> por inactividad.</p>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+              <button className="cancel-btn" onClick={() => { setShowInactivityWarning(false); }}>Cerrar</button>
+              <button className="save-btn" onClick={() => { socket.emit('userActivity', { nickname: currentNickname }); setShowInactivityWarning(false); }}>Permanecer conectado</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPanel && (
         <div className="participants-panel">
@@ -547,7 +922,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
             {participants.map((u, i) => (
               <li key={i}>
                 <span>●</span> {u.nickname}
-                {isAdmin && u.nickname !== nickname && (
+                {isAdmin && u.nickname !== currentNickname && (
                   <button
                     className="kick-btn"
                     onClick={() => handleKickUser(u.nickname)}
@@ -570,7 +945,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
         {messages.map((msg, i) => (
           <div 
             key={i} 
-            className={`message ${msg.sender === nickname ? "sent" : "received"}`}
+            className={`message ${msg.sender === currentNickname ? "sent" : "received"}`}
             onContextMenu={(e) => handleContextMenu(e, msg)}
           >
             <div className="message-content">
@@ -620,7 +995,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
           onChange={(e) => {
             setMessage(e.target.value);
             // Actualizar actividad al escribir
-            socket.emit("userActivity", { nickname });
+            socket.emit("userActivity", { nickname: currentNickname });
           }}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
           disabled={isKicked}
@@ -659,7 +1034,7 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
           onClick={(e) => e.stopPropagation()}
         >
           {/* Solo mostrar editar si es el dueño del mensaje y no es archivo */}
-          {contextMenu.message?.sender === nickname && contextMenu.message?.type !== "file" && (
+          {contextMenu.message?.sender === currentNickname && contextMenu.message?.type !== "file" && (
             <div 
               className="context-menu-item"
               onClick={() => {

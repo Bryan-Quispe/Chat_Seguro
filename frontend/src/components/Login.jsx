@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { API_URL } from "../api/config";
 import toast from "react-hot-toast";
+import "./Login.css";
 
 export default function Login({ onLogin, onJoinRoom }) {
   const [nickname, setNickname] = useState("");
@@ -53,7 +54,7 @@ export default function Login({ onLogin, onJoinRoom }) {
     <div className="login-container">
       <div className="login-card">
         <h2>Unirse a una Sala</h2>
-        <p style={{ marginBottom: "1.5rem", color: "#666", fontSize: "0.9rem" }}>
+        <p style={{ marginBottom: "1.5rem", color: "#888", fontSize: "0.9rem" }}>
           Ingresa tu nickname y el PIN de la sala
         </p>
         <form onSubmit={handleJoinRoom}>
@@ -87,11 +88,11 @@ export default function Login({ onLogin, onJoinRoom }) {
         }}>
           <p style={{ 
             textAlign: "center", 
-            color: "#666", 
+            color: "#888", 
             fontSize: "0.85rem",
             marginBottom: "0.5rem" 
           }}>
-            �Eres administrador?
+            ¿Eres administrador?
           </p>
           <button
             type="button"

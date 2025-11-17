@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
+import { API_URL } from "./api/config";
 import Login from "./components/Login";
 import AdminLogin from "./components/AdminLogin";
 import Dashboard from "./components/Dashboard";
@@ -8,7 +10,33 @@ import AdminPanel from "./components/AdminPanel";
 export default function App() {
   const [nickname, setNickname] = useState(localStorage.getItem("nickname") || "");
   const [selectedRoom, setSelectedRoom] = useState(null);
-  const [view, setView] = useState("login");
+  // If there's a stored nickname, default to dashboard so refresh doesn't force login
+  const [view, setView] = useState(localStorage.getItem("nickname") ? "dashboard" : "login");
+
+  // Restore chat session (room) if user was inside a room before reload
+  useEffect(() => {
+    const storedRoomId = localStorage.getItem("roomId");
+    const storedNickname = localStorage.getItem("nickname");
+    if (storedNickname && storedRoomId) {
+      // Fetch room details to restore selectedRoom
+      (async () => {
+        try {
+          const token = localStorage.getItem("token");
+          const res = await axios.get(`${API_URL}/api/rooms/${storedRoomId}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          const room = res.data;
+          if (room && room._id) {
+            setSelectedRoom(room);
+            setView("chat");
+          }
+        } catch (e) {
+          // If fetch fails, fall back to dashboard view but keep nickname
+          setView("dashboard");
+        }
+      })();
+    }
+  }, []);
 
   // Vista de login para administrador
   if (view === "adminLogin") {
@@ -17,6 +45,7 @@ export default function App() {
         onLogin={(adminData) => {
           setView("adminPanel");
         }}
+        onBack={() => setView("login")}
       />
     );
   }
@@ -26,8 +55,7 @@ export default function App() {
     return (
       <AdminPanel
         onBack={() => {
-          localStorage.removeItem("token");
-          localStorage.removeItem("adminName");
+          // No eliminar token: conservar sesión de admin al regresar a la vista de usuario
           setView("login");
         }}
       />

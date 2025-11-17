@@ -30,6 +30,75 @@ const FILE_SIGNATURES = {
 };
 
 /**
+ * Detecta posibles datos ocultos en los bits menos significativos (LSB) de la imagen
+ * usando la librería 'sharp' para obtener los píxeles en crudo. Devuelve un objeto
+ * con indicios si encuentra firmas o alta entropía en el flujo reconstruido.
+ */
+const detectLSBUsingSharp = async (filePath, maxPixels = 200000) => {
+  try {
+    // Import dinámico de sharp (si no está instalado, lanzar error controlado)
+    let sharp;
+    try {
+      sharp = (await import('sharp')).default;
+    } catch (e) {
+      throw new Error('sharp-no-present');
+    }
+
+    // Obtener buffer crudo RGBA
+    const img = sharp(filePath).ensureAlpha();
+    const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+    const channels = info.channels || 4;
+    const totalPixels = Math.floor(data.length / channels);
+    const pixelsToUse = Math.min(totalPixels, maxPixels);
+
+    // Extraer bits LSB de los primeros pixelsToUse pixels
+    const bits = [];
+    const bytesApprox = Math.floor((pixelsToUse * channels) / 8);
+    for (let i = 0; i < pixelsToUse * channels; i++) {
+      bits.push(data[i] & 1);
+    }
+
+    // Construir bytes a partir de bits (MSB-first)
+    const outBytes = [];
+    for (let i = 0; i + 7 < bits.length; i += 8) {
+      let val = 0;
+      for (let b = 0; b < 8; b++) {
+        val = (val << 1) | bits[i + b];
+      }
+      outBytes.push(val);
+    }
+
+    const outBuf = Buffer.from(outBytes);
+
+    // Calcular entropía del stream LSB
+    const lsbEntropy = calculateEntropy(outBuf);
+
+    // Buscar firmas conocidas en el flujo reconstruido
+    const signaturesFound = [];
+    const searchLimit = Math.min(outBuf.length, 500000);
+    for (let i = 0; i < searchLimit - 4; i++) {
+      if (matchesSignature(outBuf, FILE_SIGNATURES.ZIP, i)) signaturesFound.push({ type: 'ZIP', offset: i });
+      if (matchesSignature(outBuf, FILE_SIGNATURES.RAR, i)) signaturesFound.push({ type: 'RAR', offset: i });
+      if (matchesSignature(outBuf, FILE_SIGNATURES['7Z'], i)) signaturesFound.push({ type: '7Z', offset: i });
+      if (matchesSignature(outBuf, FILE_SIGNATURES.EXE, i)) signaturesFound.push({ type: 'EXE', offset: i });
+      if (matchesSignature(outBuf, FILE_SIGNATURES.PDF, i)) signaturesFound.push({ type: 'PDF', offset: i });
+    }
+
+    const suspicious = signaturesFound.length > 0 || lsbEntropy > 7.5;
+
+    return {
+      suspicious,
+      lsbEntropy: lsbEntropy.toFixed(2),
+      signaturesFound,
+      reason: signaturesFound.length > 0 ? `Firmas: ${signaturesFound.map(s=>s.type).join(',')}` : (lsbEntropy > 7.5 ? 'Alta entropía en LSB' : null)
+    };
+  } catch (err) {
+    // Propagar error para ser manejado por el caller
+    throw err;
+  }
+};
+
+/**
  * Compara bytes con una firma
  */
 const matchesSignature = (buffer, signature, offset = 0) => {
@@ -63,34 +132,13 @@ const scanForHiddenFiles = (buffer) => {
       detections.push({ type: '7Z', offset: i, risk: 'HIGH' });
     }
     
-    // Ejecutables - NO marcar como críticos en archivos de imagen (falsos positivos comunes)
-    // Solo marcar como críticos en archivos que NO son imágenes
+    // Ejecutables: marcar detecciones en cualquier offset como CRITICAL
+    // (esto detecta casos donde un ejecutable fue concatenado/embebido en un archivo legítimo)
     if (matchesSignature(buffer, FILE_SIGNATURES.EXE, i)) {
-      // Para archivos de imagen, ignorar completamente las detecciones de EXE (falsos positivos)
-      // Solo marcar como CRÍTICO si NO es un archivo de imagen
-      const isImageFile = matchesSignature(buffer, FILE_SIGNATURES.JPEG) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.PNG) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.GIF) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.BMP) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.WEBP);
-
-      if (!isImageFile) {
-        detections.push({ type: 'EXE', offset: i, risk: 'CRITICAL' });
-      }
-      // En archivos de imagen, no agregar detección (ignorar falsos positivos)
+      detections.push({ type: 'EXE', offset: i, risk: 'CRITICAL' });
     }
     if (matchesSignature(buffer, FILE_SIGNATURES.ELF, i)) {
-      // Similar lógica para ELF
-      const isImageFile = matchesSignature(buffer, FILE_SIGNATURES.JPEG) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.PNG) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.GIF) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.BMP) ||
-                         matchesSignature(buffer, FILE_SIGNATURES.WEBP);
-
-      if (!isImageFile) {
-        detections.push({ type: 'ELF', offset: i, risk: 'CRITICAL' });
-      }
-      // En archivos de imagen, no agregar detección (ignorar falsos positivos)
+      detections.push({ type: 'ELF', offset: i, risk: 'CRITICAL' });
     }
     
     // PDFs ocultos
@@ -144,6 +192,46 @@ const calculateEntropy = (buffer) => {
 };
 
 /**
+ * Analiza la entropía en ventanas deslizantes para detectar regiones de alta entropía
+ * que pueden indicar datos ocultos (LSB o regiones comprimidas/encriptadas).
+ */
+const slidingWindowEntropy = (buffer, windowSize = 4096, step = 1024, threshold = 7.5) => {
+  const limit = Math.min(buffer.length, 20 * 1024 * 1024); // no analizar >20MB
+  for (let start = 0; start + windowSize <= limit; start += step) {
+    const slice = buffer.slice(start, start + windowSize);
+    const ent = calculateEntropy(slice);
+    if (ent > threshold) {
+      return { suspicious: true, offset: start, entropy: ent };
+    }
+  }
+  return { suspicious: false };
+};
+
+/**
+ * Inspecciona chunks de PNG buscando chunks auxiliares inusualmente grandes
+ * que puedan contener datos ocultos.
+ */
+const inspectPNGChunks = (buffer) => {
+  const results = [];
+  // PNG signature + first 8 bytes already validated en validatePNG
+  let pos = 8;
+  while (pos + 8 < buffer.length) {
+    // chunk length (4 bytes big-endian)
+    const length = buffer.readUInt32BE(pos);
+    const type = buffer.toString('ascii', pos + 4, pos + 8);
+    // sanity
+    if (isNaN(length) || length < 0 || pos + 12 + length > buffer.length) break;
+    // marcar chunks auxiliares con tamaño sospechoso (>5KB)
+    const ancillary = type[0] && type[0] === type[0].toLowerCase();
+    if (ancillary && length > 5 * 1024) {
+      results.push({ type, length, offset: pos });
+    }
+    pos += 12 + length; // length(4) + type(4) + data(length) + crc(4)
+  }
+  return results;
+};
+
+/**
  * Verifica si hay datos sospechosos al final del archivo
  * (técnica común: agregar archivo ZIP al final de una imagen)
  */
@@ -151,11 +239,60 @@ const checkTrailingData = (buffer, declaredType) => {
   const imageTypes = ['JPEG', 'PNG', 'GIF', 'BMP', 'WEBP'];
   if (!imageTypes.includes(declaredType)) return null;
 
-  // Para JPEG: NO verificar trailing data ya que es válido según la especificación
-  // Los archivos JPEG pueden tener "trailing garbage" después del marcador EOI (FF D9)
-  // y esto NO es necesariamente esteganografía
+  // Para JPEG: Es cierto que puede haber "trailing garbage" después del marcador EOI (FF D9),
+  // pero también es una técnica común para ocultar archivos (append). Aquí intentamos
+  // detectar firmas conocidas (ZIP/RAR/7Z/EXE/ELF/PDF) después del EOI y marcar como
+  // sospechoso si se encuentran datos significativos.
   if (declaredType === 'JPEG') {
-    return null; // No marcar como sospechoso
+    // Buscar marcador EOI (FF D9) desde el final
+    let eoiPos = -1;
+    for (let i = buffer.length - 2; i >= 0; i--) {
+      if (buffer[i] === 0xFF && buffer[i + 1] === 0xD9) {
+        eoiPos = i + 2; // posición después de EOI
+        break;
+      }
+    }
+
+    if (eoiPos !== -1 && eoiPos < buffer.length) {
+      const trailingBytes = buffer.length - eoiPos;
+      // Escanear los primeros 1MB posteriores al EOI o hasta el final
+      const scanEnd = Math.min(buffer.length, eoiPos + Math.min(trailingBytes, 1024 * 1024));
+      for (let j = eoiPos; j < scanEnd - 4; j++) {
+        if (matchesSignature(buffer, FILE_SIGNATURES.ZIP, j) || matchesSignature(buffer, FILE_SIGNATURES.RAR, j) || matchesSignature(buffer, FILE_SIGNATURES['7Z'], j) ) {
+          return {
+            suspicious: true,
+            trailingBytes,
+            message: 'Datos sospechosos agregados después del fin de imagen JPEG (posible archivo embebido)'
+          };
+        }
+        if (matchesSignature(buffer, FILE_SIGNATURES.EXE, j) || matchesSignature(buffer, FILE_SIGNATURES.ELF, j)) {
+          return {
+            suspicious: true,
+            trailingBytes,
+            message: 'Ejecutable embebido detectado después del EOF de JPEG'
+          };
+        }
+        if (matchesSignature(buffer, FILE_SIGNATURES.PDF, j)) {
+          return {
+            suspicious: true,
+            trailingBytes,
+            message: 'PDF detectado después del EOF de JPEG (posible archivo oculto)'
+          };
+        }
+      }
+      // Si hay muchos bytes extra sin firmas específicas, considerarlo sospechoso
+      // sólo si es una cantidad significativa (ej. > 10KB). Esto reduce falsos
+      // positivos con algunos encoders/metadata que añaden pequeños trailers.
+      if (trailingBytes > 10 * 1024) {
+        return {
+          suspicious: true,
+          trailingBytes,
+          message: 'Datos extra significativos después del fin de imagen JPEG'
+        };
+      }
+    }
+
+    return null;
   }
 
   // Para PNG: buscar después del chunk IEND
@@ -350,8 +487,14 @@ export const detectSteganography = async (filePath) => {
     // 2. Verificar datos al final del archivo
     const trailingData = checkTrailingData(buffer, detectedType);
     
-    // 3. Analizar entropía (valores muy altos = posible encriptación/compresión oculta)
-    const highEntropy = entropy > 8.0; // Umbral de entropía sospechosa (más permisivo)
+    // 3. Analizar entropía global (valores muy altos = posible encriptación/compresión oculta)
+    const highEntropy = entropy > 8.0; // Umbral global de entropía sospechosa
+
+    // 3b. Analizar entropía por ventanas para detectar regiones locales de alta entropía
+    const windowResult = slidingWindowEntropy(buffer);
+
+    // 3c. Para PNGs, inspeccionar chunks auxiliares inusuales
+    const pngChunks = detectedType === 'PNG' ? inspectPNGChunks(buffer) : [];
     
     // Determinar si el archivo es sospechoso
     // Solo considerar archivos con riesgo CRÍTICO o HIGH como sospechosos
@@ -359,19 +502,55 @@ export const detectSteganography = async (filePath) => {
     const highRiskFiles = suspiciousFiles.filter(f => f.risk === 'HIGH');
 
     const isSuspicious = criticalFiles.length > 0 ||
-                        highRiskFiles.length > 0 ||
-                        (trailingData && trailingData.suspicious) ||
-                        (highEntropy && detectedType !== 'ZIP' && detectedType !== 'RAR');
+              highRiskFiles.length > 0 ||
+              (trailingData && trailingData.suspicious) ||
+              (highEntropy && detectedType !== 'ZIP' && detectedType !== 'RAR') ||
+              (windowResult.suspicious) ||
+              (pngChunks && pngChunks.length > 0);
     
+    const detailsArray = [];
+    // 4. Análisis LSB usando 'sharp' para imágenes razonables (más costoso)
+    let lsbResult = null;
+    try {
+      const imageTypes = ['JPEG','PNG','GIF','WEBP','BMP'];
+      // Ejecutar LSB si es imagen y no muy grande (ej. < 5MB) o si ya hay sospecha
+      if ((imageTypes.includes(detectedType) && buffer.length <= 5 * 1024 * 1024) || windowResult.suspicious || highEntropy || (trailingData && trailingData.suspicious) || (pngChunks && pngChunks.length > 0)) {
+        lsbResult = await detectLSBUsingSharp(filePath);
+        if (lsbResult && lsbResult.suspicious) {
+          // aumentar el nivel de sospecha
+          detailsArray.push(`LSB sospechoso: ${lsbResult.reason || 'alta entropía / firma detectada'}`);
+        }
+      }
+    } catch (e) {
+      // no bloquear si sharp no está disponible o falla; solo loguear
+      // console.warn('LSB analysis failed', e);
+    }
+    if (suspiciousFiles.length) detailsArray.push(...suspiciousFiles.map(f => `${f.type}@${f.offset}`));
+    if (trailingData && trailingData.suspicious) detailsArray.push(trailingData.message);
+    if (windowResult.suspicious) detailsArray.push(`Región de alta entropía en offset ${windowResult.offset} (entropía=${windowResult.entropy.toFixed(2)})`);
+    if (pngChunks && pngChunks.length) detailsArray.push(`Chunks PNG inusuales: ${pngChunks.map(c=>`${c.type}:${c.length}`).join(', ')}`);
+
+    // Considerar LSB como evidencia final si detectó algo
+    const finalSuspicious = isSuspicious || (lsbResult && lsbResult.suspicious);
+
+    if (suspiciousFiles.length) detailsArray.push(...suspiciousFiles.map(f => `${f.type}@${f.offset}`));
+    if (trailingData && trailingData.suspicious) detailsArray.push(trailingData.message);
+    if (windowResult.suspicious) detailsArray.push(`Región de alta entropía en offset ${windowResult.offset} (entropía=${windowResult.entropy.toFixed(2)})`);
+    if (pngChunks && pngChunks.length) detailsArray.push(`Chunks PNG inusuales: ${pngChunks.map(c=>`${c.type}:${c.length}`).join(', ')}`);
+    if (lsbResult) detailsArray.push(`LSB: entropy=${lsbResult.lsbEntropy}${lsbResult.signaturesFound?.length ? ' signatures='+lsbResult.signaturesFound.map(s=>s.type).join(',') : ''}`);
+
     return {
-      safe: !isSuspicious,
+      safe: !finalSuspicious,
       detectedType,
       entropy: entropy.toFixed(2),
       hiddenFiles: suspiciousFiles,
       trailingData,
       highEntropy,
+      highEntropyWindow: windowResult.suspicious ? windowResult : null,
+      pngSuspiciousChunks: pngChunks,
+      lsbResult,
       fileSize: buffer.length,
-      details: isSuspicious ? buildWarningMessage(suspiciousFiles, trailingData, highEntropy) : 'Archivo seguro'
+      details: finalSuspicious ? (detailsArray.join(' | ') || buildWarningMessage(suspiciousFiles, trailingData, highEntropy)) : 'Archivo seguro'
     };
     
   } catch (error) {
@@ -422,7 +601,8 @@ export const quickValidation = (mimetype, filename) => {
     '.app', '.deb', '.rpm', '.sh', '.bash', '.elf', '.bin'
   ];
   
-  const ext = filename.toLowerCase().match(/\.[^.]+$/)?.[0];
+  // Revisar solo la extensión final del nombre de archivo
+  const ext = (filename || '').toLowerCase().match(/\.[^.]+$/)?.[0];
   if (ext && dangerousExtensions.includes(ext)) {
     return {
       safe: false,
