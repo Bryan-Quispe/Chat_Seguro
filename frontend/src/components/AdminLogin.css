@@ -112,6 +112,16 @@
     transform: none !important;
     }
 
+    /* Verde para botones como "Verificar 2FA" */
+    .bg-green-600 {
+    background: linear-gradient(145deg, #10b981, #059669) !important;
+    color: white !important;
+    box-shadow: 0 6px 20px rgba(16,185,129,0.25);
+    }
+    .hover\:bg-green-700:hover {
+    background: linear-gradient(145deg, #059669, #047857) !important;
+    }
+
     .mt-4 {
     margin-top: 1.5rem;
     }
@@ -140,7 +150,8 @@
     /* Estilos personalizados adicionales */
     .bg-white {
     position: relative;
-    overflow: hidden;
+    /* permitir que elementos (iconos/botones) no se recorten en bordes */
+    overflow: visible;
     border: 1px solid #2d2d3a;
     }
 

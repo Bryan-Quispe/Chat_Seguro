@@ -35,6 +35,8 @@ services:
       - ENCRYPTION_KEY=1c191a74b95621a8fe4afce2e695c3d1c830b712cf69cadbed488a7c3cb8a0c5
       - CLIENT_ORIGIN=http://localhost:5173
       - PORT=5000
+      - PIN_HMAC_SECRET=${PIN_HMAC_SECRET}
+      - PIN_ENC_KEY=${PIN_ENC_KEY}
       - UPLOAD_STRICT_MODE=false
     volumes:
       - ./backend:/app

@@ -1,21 +1,23 @@
 import Room from "../models/Room.js";
 import crypto from "crypto";
+import { hmacPin, encryptPin } from "../utils/pinCrypto.js";
 
 // 🔹 Crear nueva sala
 export const createRoom = async (req, res) => {
   try {
     const { name, type, pin } = req.body;
-    const roomPin =
-      pin && pin.trim() !== "" ? pin : crypto.randomInt(1000, 9999).toString();
+    const roomPin = pin && pin.trim() !== "" ? pin : crypto.randomInt(1000, 9999).toString();
 
-    const existing = await Room.findOne({ pin: roomPin });
+    const pinHash = hmacPin(roomPin);
+    const existing = await Room.findOne({ pinHash });
     if (existing)
       return res.status(400).json({ message: "Ya existe una sala con ese PIN" });
 
     const room = await Room.create({
       name,
       type,
-      pin: roomPin,
+      pinHash,
+      pinEncrypted: encryptPin(roomPin),
       createdBy: req.user?._id || null, // Guarda quién la creó
     });
 

@@ -383,7 +383,7 @@ export default function AdminPanel({ onBack }) {
               </button>
             )}
           </div>
-          <button className="icon-btn" onClick={() => fetchDownloads()} style={{ marginLeft: '0.5rem' }}>📥 Descargas</button>
+          {/* Descargas eliminado: ya no se usa */}
         </div>
       </header>
 
@@ -525,41 +525,53 @@ export default function AdminPanel({ onBack }) {
               rooms.map((room) => (
                 <div key={room._id} className="room-card">
                   <div className="room-info">
-                    <h3>{room.name}</h3>
+                    <h3>
+                      <span
+                        className={`status-dot ${room.activeCount && room.activeCount > 0 ? 'online' : 'offline'}`}
+                        title={room.activeCount && room.activeCount > 0 ? `${room.activeCount} en línea` : 'Sin usuarios en línea'}
+                        aria-hidden="false"
+                      />
+                      {room.name}
+                    </h3>
                       <p className="room-type">{room.type}</p>
                       <small className="room-pin">PIN: {room.pin}</small>
                       <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.85rem', color: '#9ca3af' }}>Participantes: <strong style={{ color: '#fff' }}>{room.participantsCount ?? '—'}</strong></span>
                         <span style={{ fontSize: '0.85rem', color: '#9ca3af' }}>En línea: <strong style={{ color: '#10b981' }}>{room.activeCount ?? '0'}</strong></span>
                       </div>
-                  </div>
-                  <div className="actions">
-                    <button
-                      className="icon-btn edit"
-                      onClick={() => {
-                        console.log("CLICK EN EDITAR", room);
-                        handleEdit(room);
-                      }}
+                    <div
+                      className="actions"
+                      style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end', marginTop: '0.6rem' }}
                     >
-                      Editar
-                    </button>
-                    <button
-                      className="icon-btn"
-                      onClick={() => viewParticipants(room)}
-                      title="Ver miembros"
-                      style={{ background: 'linear-gradient(145deg, #f59e0b, #d97706)', color: 'white' }}
-                    >
-                      Miembros
-                    </button>
-                    <button
-                      className="icon-btn delete"
-                      onClick={() => {
-                        console.log("CLICK EN ELIMINAR", room._id);
-                        handleDelete(room._id);
-                      }}
-                    >
-                      Eliminar
-                    </button>
+                      <button
+                        className="icon-btn edit"
+                        onClick={() => {
+                          console.log("CLICK EN EDITAR", room);
+                          handleEdit(room);
+                        }}
+                        style={{ display: 'inline-flex', background: 'linear-gradient(145deg, #6366f1, #4f46e5)', color: '#fff', padding: '0.5rem 0.9rem', borderRadius: 8, minWidth: 56 }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        className="icon-btn"
+                        onClick={() => viewParticipants(room)}
+                        title="Ver miembros"
+                        style={{ display: 'inline-flex', background: 'linear-gradient(145deg, #f59e0b, #d97706)', color: 'white', padding: '0.5rem 0.9rem', borderRadius: 8, minWidth: 56 }}
+                      >
+                        Miembros
+                      </button>
+                      <button
+                        className="icon-btn delete"
+                        onClick={() => {
+                          console.log("CLICK EN ELIMINAR", room._id);
+                          handleDelete(room._id);
+                        }}
+                        style={{ display: 'inline-flex', background: 'linear-gradient(145deg, #ef4444, #dc2626)', color: '#fff', padding: '0.5rem 0.9rem', borderRadius: 8, minWidth: 56 }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))

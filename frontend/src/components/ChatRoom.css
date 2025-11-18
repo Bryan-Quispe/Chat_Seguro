@@ -361,21 +361,26 @@
 
 /* Archivos y multimedia */
 .chat-image {
+  /* Inline image preview: keep compact and preserve aspect ratio */
   max-width: 250px;
   max-height: 250px;
+  width: auto;
+  height: auto;
   border-radius: 12px;
   margin-top: 6px;
   display: block;
   cursor: pointer;
-  object-fit: cover;
+  object-fit: contain;
   border: 2px solid rgba(99, 102, 241, 0.2);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
 }
 
 .image-wrapper {
   position: relative;
   display: inline-block;
   border-radius: 12px;
+  overflow: hidden;
 }
 
 .image-overlay {
@@ -568,6 +573,7 @@
   animation: slideUp 0.3s ease-out;
   border: 1px solid #2d2d3a;
   color: white;
+  overflow: auto; /* permitir scroll si la imagen es grande */
 }
 
 @keyframes slideUp {
@@ -586,6 +592,17 @@
   font-size: 1.3rem;
   color: white;
   font-weight: 700;
+}
+
+/* Imagen en modal de vista previa: adaptativa y centrada */
+.modal-content img {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  margin: 0 auto;
 }
 
 .modal-content p {

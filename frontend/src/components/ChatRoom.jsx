@@ -858,7 +858,8 @@ export default function ChatRoom({ roomId, pin, nickname, onBack }) {
                   a.click();
                   a.remove();
                   URL.revokeObjectURL(blobUrl);
-                  toast.success('Descarga completada', { id: 'download-progress' });
+                  // Reemplazar el toast de progreso por uno exitoso que cierre después de 3s
+                  toast.success('Descarga completada', { id: 'download-progress', duration: 3000 });
 
                   // Registrar descarga en backend (auditoría)
                   try {

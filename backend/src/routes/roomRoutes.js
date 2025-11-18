@@ -2,11 +2,12 @@
 import express from "express";
 import Room from "../models/Room.js";
 import { protectAny } from "../middleware/authMiddleware.js";
-import { 
-  validateCreateRoom, 
-  validatePin 
+import {
+  validateCreateRoom,
+  validatePin
 } from "../middleware/validators.js";
 import crypto from "crypto";
+import { hmacPin, encryptPin } from "../utils/pinCrypto.js";
 
 const router = express.Router();
 
@@ -15,17 +16,18 @@ router.post("/", protectAny, validateCreateRoom, async (req, res) => {
   try {
     console.log("🔵 POST /api/rooms - Body recibido:", req.body);
     const { name, type, pin } = req.body;
-    const roomPin =
-      pin && pin.trim() !== "" ? pin : crypto.randomInt(1000, 9999).toString();
+    const roomPin = pin && pin.trim() !== "" ? pin : crypto.randomInt(1000, 9999).toString();
 
-    const existing = await Room.findOne({ pin: roomPin });
+    const pinHash = hmacPin(roomPin);
+    const existing = await Room.findOne({ pinHash });
     if (existing)
       return res.status(400).json({ message: "Ya existe una sala con ese PIN" });
 
     const room = await Room.create({
       name,
       type,
-      pin: roomPin,
+      pinHash,
+      pinEncrypted: encryptPin(roomPin),
       createdBy: req.user._id,
     });
 
@@ -60,7 +62,8 @@ router.get("/:id", async (req, res) => {
 // Buscar sala por PIN
 router.get("/pin/:pin", validatePin, async (req, res) => {
   try {
-    const room = await Room.findOne({ pin: req.params.pin }).populate("createdBy");
+    const pinHash = hmacPin(req.params.pin);
+    const room = await Room.findOne({ pinHash }).populate("createdBy");
     if (!room) return res.status(404).json({ message: "Sala no encontrada con ese PIN" });
     res.json(room);
   } catch (err) {

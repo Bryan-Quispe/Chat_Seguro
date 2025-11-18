@@ -1,5 +1,6 @@
 // steganographyDetector.js - Detecta archivos con esteganografía
 import fs from 'fs';
+import path from 'path';
 
 /**
  * Firmas de archivos (magic numbers) para detectar archivos ocultos
@@ -319,6 +320,39 @@ const checkTrailingData = (buffer, declaredType) => {
     }
   }
 
+  // Para PDF: buscar EOF ('%%EOF') y comprobar si hay datos significativos añadidos
+  if (declaredType === 'PDF') {
+    try {
+      const eofMarker = Buffer.from('%%EOF');
+      let lastEof = -1;
+      for (let i = buffer.length - eofMarker.length; i >= 0; i--) {
+        if (matchesSignature(buffer, Array.from(eofMarker), i)) {
+          lastEof = i + eofMarker.length;
+          break;
+        }
+      }
+      if (lastEof !== -1 && lastEof < buffer.length) {
+        const trailingBytes = buffer.length - lastEof;
+        // Si hay firmas peligrosas (EXE/ZIP/RAR) en el siguiente MB, marcar
+        const scanEnd = Math.min(buffer.length, lastEof + Math.min(trailingBytes, 1024 * 1024));
+        for (let j = lastEof; j < scanEnd - 4; j++) {
+          if (matchesSignature(buffer, FILE_SIGNATURES.EXE, j) || matchesSignature(buffer, FILE_SIGNATURES.ELF, j)) {
+            return { suspicious: true, trailingBytes, message: 'Ejecutable detectado después del EOF de PDF' };
+          }
+          if (matchesSignature(buffer, FILE_SIGNATURES.ZIP, j) || matchesSignature(buffer, FILE_SIGNATURES.RAR, j) || matchesSignature(buffer, FILE_SIGNATURES['7Z'], j)) {
+            return { suspicious: true, trailingBytes, message: 'Archivo comprimido detectado después del EOF de PDF' };
+          }
+        }
+        // Si hay una cantidad importante de bytes extra (>50KB) marcar como sospechoso
+        if (trailingBytes > 50 * 1024) {
+          return { suspicious: true, trailingBytes, message: 'Datos añadidos después del EOF de PDF' };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   return null;
 };
 
@@ -482,13 +516,24 @@ export const detectSteganography = async (filePath) => {
     // 1. Buscar archivos ocultos
     const hiddenFiles = scanForHiddenFiles(buffer);
     
-    // Filtrar la primera detección si coincide con el tipo de archivo
-    // (para evitar falsos positivos con archivos ZIP legítimos)
+    // Filtrar detecciones que son inocuas según la extensión y el tipo detectado
+    const ext = path.extname(filePath || '').toLowerCase();
+    const officeZipExts = ['.docx', '.xlsx', '.pptx', '.odt'];
+
     const suspiciousFiles = hiddenFiles.filter(detection => {
-      // Si es la primera detección (offset 0) y coincide con el tipo, ignorar
-      if (detection.offset === 0 && detection.type === detectedType) {
-        return false;
+      // Si la detección está en offset 0 y coincide con el tipo detectado, ignorar
+      if (detection.offset === 0 && detection.type === detectedType) return false;
+
+      // Si el archivo es un .docx/.xlsx/.pptx (ZIP) y detectamos ZIP al offset 0,
+      // es el contenedor legítimo: ignorar
+      if (detectedType === 'ZIP' && detection.type === 'ZIP' && officeZipExts.includes(ext) && detection.offset === 0) return false;
+
+      // Para PDFs y documentos ofimáticos, ser más permisivos: sólo marcar detecciones
+      // como sospechosas si están en un offset significativo (>1KB) o si son ejecutables
+      if ((detectedType === 'PDF' || officeZipExts.includes(ext) || detectedType === 'DOC') && detection.type !== 'EXE' && detection.type !== 'ELF') {
+        if (detection.offset < 1024) return false;
       }
+
       return true;
     });
     

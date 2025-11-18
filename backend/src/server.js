@@ -1,6 +1,7 @@
 // server.js
 import http from "http";
 import { Server } from "socket.io";
+import { hmacPin } from "./utils/pinCrypto.js";
 import dotenv from "dotenv";
 import app from "./app.js";
 import { connectDB } from "./config/db.js";
@@ -151,7 +152,8 @@ io.on("connection", (socket) => {
     const pin = sanitizeString(payload?.pin);
     const nickname = sanitizeString(payload?.nickname);
     try {
-      const room = await Room.findOne({ pin });
+      const pinHash = hmacPin(pin);
+      const room = await Room.findOne({ pinHash });
       if (!room) {
         socket.emit("errorMessage", "PIN inválido");
         return;
