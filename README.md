@@ -558,23 +558,23 @@ sequenceDiagram
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   CAPA DE PRESENTACIÓN               │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐      │
-│  │  Login/   │  │ Dashboard │  │ ChatRoom  │      │
-│  │ Register  │  │           │  │           │      │
-│  └───────────┘  └───────────┘  └───────────┘      │
+│                   CAPA DE PRESENTACIÓN              │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
+│  │  Login/   │  │ Dashboard │  │ ChatRoom  │        │
+│  │ Register  │  │           │  │           │        │
+│  └───────────┘  └───────────┘  └───────────┘        │
 │       │               │               │             │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐      │
-│  │AdminLogin │  │AdminPanel │  │Components │      │
-│  └───────────┘  └───────────┘  └───────────┘      │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
+│  │AdminLogin │  │AdminPanel │  │Components │        │
+│  └───────────┘  └───────────┘  └───────────┘        │
 └─────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│                  CAPA DE SERVICIOS                   │
-│  ┌──────────────────┐  ┌──────────────────┐        │
-│  │  Socket.IO Client│  │  Axios (HTTP)    │        │
-│  └──────────────────┘  └──────────────────┘        │
+│                  CAPA DE SERVICIOS                  │
+│  ┌──────────────────┐  ┌──────────────────┐         │
+│  │  Socket.IO Client│  │  Axios (HTTP)    │         │
+│  └──────────────────┘  └──────────────────┘         │
 └─────────────────────────────────────────────────────┘
                         │
           ──────────────┼──────────────
@@ -582,39 +582,39 @@ sequenceDiagram
           ──────────────┼──────────────
                         │
 ┌─────────────────────────────────────────────────────┐
-│                   CAPA DE LÓGICA                     │
-│  ┌──────────────────────────────────────┐          │
-│  │         Socket.IO Server              │          │
-│  │  • joinRoom    • sendMessage          │          │
-│  │  • kickUser    • userActivity         │          │
-│  └──────────────────────────────────────┘          │
-│  ┌──────────────────────────────────────┐          │
-│  │           REST API Routes             │          │
-│  │  /auth  /rooms  /messages  /files     │          │
-│  └──────────────────────────────────────┘          │
-│  ┌──────────────────────────────────────┐          │
-│  │            Controllers                │          │
-│  │  auth • room • message • file         │          │
-│  └──────────────────────────────────────┘          │
-│  ┌──────────────────────────────────────┐          │
-│  │            Middleware                 │          │
-│  │  JWT Auth • Multer • CORS             │          │
-│  └──────────────────────────────────────┘          │
+│                   CAPA DE LÓGICA                    │
+│  ┌──────────────────────────────────────┐           │
+│  │         Socket.IO Server             │           │
+│  │  • joinRoom    • sendMessage         │           │
+│  │  • kickUser    • userActivity        │           │
+│  └──────────────────────────────────────┘           │
+│  ┌──────────────────────────────────────┐           │
+│  │           REST API Routes            │           │
+│  │  /auth  /rooms  /messages  /files    │           │
+│  └──────────────────────────────────────┘           │
+│  ┌──────────────────────────────────────┐           │
+│  │            Controllers               │           │
+│  │  auth • room • message • file        │           │
+│  └──────────────────────────────────────┘           │
+│  ┌──────────────────────────────────────┐           │
+│  │            Middleware                │           │
+│  │  JWT Auth • Multer • CORS            │           │
+│  └──────────────────────────────────────┘           │
 └─────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│                 CAPA DE PERSISTENCIA                 │
-│  ┌──────────────────────────────────────┐          │
+│                 CAPA DE PERSISTENCIA                │
+│  ┌──────────────────────────────────────┐           │
 │  │            Mongoose ODM               │          │
-│  └──────────────────────────────────────┘          │
-│  ┌──────────────────────────────────────┐          │
+│  └──────────────────────────────────────┘           │
+│  ┌──────────────────────────────────────┐           │
 │  │         MongoDB Database              │          │
 │  │  Users • Rooms • Messages • Admins    │          │
-│  └──────────────────────────────────────┘          │
-│  ┌──────────────────────────────────────┐          │
-│  │        File Storage (uploads/)        │          │
-│  └──────────────────────────────────────┘          │
+│  └──────────────────────────────────────┘           │
+│  ┌──────────────────────────────────────┐           │
+│  │        File Storage (uploads/)       │           │
+│  └──────────────────────────────────────┘           │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -653,6 +653,30 @@ sequenceDiagram
    - Usuarios expulsados no pueden reingresar
    - Control por sala
    - Persistente durante sesión del servidor
+
+##  Detección de ZIP Bomb
+
+El proyecto implementa una protección contra **ZIP Bombs**, archivos comprimidos que aparentan ser pequeños pero que, al descomprimirse, pueden expandirse a tamaños extremadamente grandes y causar caídas del servidor.
+
+###  Implementación
+
+- Se instalaron las librerías requeridas para analizar ZIP y RAR sin extraerlos:
+  ```bash
+  npm install node-stream-zip node-unrar-js
+
+### Prueba de funcionamiento
+- Crear un archivo grande (100 MB):
+   ```bash
+fsutil file createnew dummy.txt 100000000
+
+Crear varias copias del archivo (10–20 veces).
+
+Comprimirlas todas en un archivo ZIP.
+
+Subir el ZIP al sistema.
+
+Si el archivo supera los límites de seguridad, el sistema lo detecta como ZIP Bomb y bloquea su carga de manera automática.
+
 
 ### Recomendaciones para Producción
 
