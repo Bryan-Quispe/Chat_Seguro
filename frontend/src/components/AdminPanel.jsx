@@ -21,6 +21,7 @@ export default function AdminPanel({ onBack }) {
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [participantsModal, setParticipantsModal] = useState({ show: false, loading: false, participants: [], room: null });
   const [downloadsModal, setDownloadsModal] = useState({ show: false, loading: false, downloads: [] });
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, room: null });
 
   // 🔹 Cargar salas desde el backend
   const fetchRooms = async () => {
@@ -156,6 +157,32 @@ export default function AdminPanel({ onBack }) {
     setEditingRoom(room);
     setForm({ name: room.name, type: room.type });
   };
+
+  // Abrir menú contextual en posición del cursor
+  const openContextMenu = (e, room) => {
+    e.preventDefault();
+    // calculate position (use client coords for fixed positioning)
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY, room });
+  };
+
+  // Cerrar menú contextual
+  const closeContextMenu = () => setContextMenu({ visible: false, x: 0, y: 0, room: null });
+
+  // Cerrar al hacer clic fuera o presionar Escape
+  useEffect(() => {
+    const onGlobalClick = () => {
+      setContextMenu((prev) => (prev.visible ? { visible: false, x: 0, y: 0, room: null } : prev));
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") closeContextMenu();
+    };
+    window.addEventListener("click", onGlobalClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onGlobalClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
 
   // 🔹 Actualizar
   const handleUpdate = async () => {
@@ -523,7 +550,7 @@ export default function AdminPanel({ onBack }) {
               </div>
             ) : (
               rooms.map((room) => (
-                <div key={room._id} className="room-card">
+                <div key={room._id} className="room-card" onContextMenu={(e) => openContextMenu(e, room)}>
                   <div className="room-info">
                     <h3>
                       <span
@@ -579,6 +606,45 @@ export default function AdminPanel({ onBack }) {
           </div>
         )}
       </div>
+
+      {contextMenu.visible && (
+        <div
+          className="context-menu"
+          style={{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              // Editar
+              closeContextMenu();
+              handleEdit(contextMenu.room);
+            }}
+          >
+            ✏️ Editar sala
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              // Ver miembros
+              closeContextMenu();
+              viewParticipants(contextMenu.room);
+            }}
+          >
+            👥 Ver miembros
+          </button>
+          <button
+            className="context-menu__item"
+            onClick={() => {
+              // Eliminar
+              closeContextMenu();
+              handleDelete(contextMenu.room._id);
+            }}
+          >
+            🗑️ Eliminar sala
+          </button>
+        </div>
+      )}
 
       {showDeleteModal && (
         <div

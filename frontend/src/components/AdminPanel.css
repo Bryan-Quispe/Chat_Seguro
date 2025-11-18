@@ -204,3 +204,30 @@
   .rooms-list{ grid-template-columns: 1fr; }
   .header-actions{ flex-wrap:wrap; }
 }
+
+/* Context menu */
+.context-menu{
+  position:fixed;
+  z-index:70;
+  min-width:180px;
+  background: linear-gradient(180deg, #0b1220, #071018);
+  border:1px solid rgba(255,255,255,0.04);
+  box-shadow: 0 12px 30px rgba(2,6,23,0.7);
+  border-radius:8px;
+  overflow:hidden;
+}
+.context-menu__item{
+  display:block;
+  width:100%;
+  text-align:left;
+  padding:10px 12px;
+  background:transparent;
+  color: #e6eef8;
+  border:0;
+  cursor:pointer;
+  font-size:0.95rem;
+}
+.context-menu__item:hover{
+  background: rgba(99,102,241,0.12);
+}
+
