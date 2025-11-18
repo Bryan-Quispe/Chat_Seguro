@@ -558,23 +558,23 @@ sequenceDiagram
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   CAPA DE PRESENTACIÓN              │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
-│  │  Login/   │  │ Dashboard │  │ ChatRoom  │        │
-│  │ Register  │  │           │  │           │        │
-│  └───────────┘  └───────────┘  └───────────┘        │
+│                   CAPA DE PRESENTACIÓN               │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐      │
+│  │  Login/   │  │ Dashboard │  │ ChatRoom  │      │
+│  │ Register  │  │           │  │           │      │
+│  └───────────┘  └───────────┘  └───────────┘      │
 │       │               │               │             │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐        │
-│  │AdminLogin │  │AdminPanel │  │Components │        │
-│  └───────────┘  └───────────┘  └───────────┘        │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐      │
+│  │AdminLogin │  │AdminPanel │  │Components │      │
+│  └───────────┘  └───────────┘  └───────────┘      │
 └─────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│                  CAPA DE SERVICIOS                  │
-│  ┌──────────────────┐  ┌──────────────────┐         │
-│  │  Socket.IO Client│  │  Axios (HTTP)    │         │
-│  └──────────────────┘  └──────────────────┘         │
+│                  CAPA DE SERVICIOS                   │
+│  ┌──────────────────┐  ┌──────────────────┐        │
+│  │  Socket.IO Client│  │  Axios (HTTP)    │        │
+│  └──────────────────┘  └──────────────────┘        │
 └─────────────────────────────────────────────────────┘
                         │
           ──────────────┼──────────────
@@ -582,39 +582,39 @@ sequenceDiagram
           ──────────────┼──────────────
                         │
 ┌─────────────────────────────────────────────────────┐
-│                   CAPA DE LÓGICA                    │
-│  ┌──────────────────────────────────────┐           │
-│  │         Socket.IO Server             │           │
-│  │  • joinRoom    • sendMessage         │           │
-│  │  • kickUser    • userActivity        │           │
-│  └──────────────────────────────────────┘           │
-│  ┌──────────────────────────────────────┐           │
-│  │           REST API Routes            │           │
-│  │  /auth  /rooms  /messages  /files    │           │
-│  └──────────────────────────────────────┘           │
-│  ┌──────────────────────────────────────┐           │
-│  │            Controllers               │           │
-│  │  auth • room • message • file        │           │
-│  └──────────────────────────────────────┘           │
-│  ┌──────────────────────────────────────┐           │
-│  │            Middleware                │           │
-│  │  JWT Auth • Multer • CORS            │           │
-│  └──────────────────────────────────────┘           │
+│                   CAPA DE LÓGICA                     │
+│  ┌──────────────────────────────────────┐          │
+│  │         Socket.IO Server              │          │
+│  │  • joinRoom    • sendMessage          │          │
+│  │  • kickUser    • userActivity         │          │
+│  └──────────────────────────────────────┘          │
+│  ┌──────────────────────────────────────┐          │
+│  │           REST API Routes             │          │
+│  │  /auth  /rooms  /messages  /files     │          │
+│  └──────────────────────────────────────┘          │
+│  ┌──────────────────────────────────────┐          │
+│  │            Controllers                │          │
+│  │  auth • room • message • file         │          │
+│  └──────────────────────────────────────┘          │
+│  ┌──────────────────────────────────────┐          │
+│  │            Middleware                 │          │
+│  │  JWT Auth • Multer • CORS             │          │
+│  └──────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────┘
                         │
                         ▼
 ┌─────────────────────────────────────────────────────┐
-│                 CAPA DE PERSISTENCIA                │
-│  ┌──────────────────────────────────────┐           │
+│                 CAPA DE PERSISTENCIA                 │
+│  ┌──────────────────────────────────────┐          │
 │  │            Mongoose ODM               │          │
-│  └──────────────────────────────────────┘           │
-│  ┌──────────────────────────────────────┐           │
+│  └──────────────────────────────────────┘          │
+│  ┌──────────────────────────────────────┐          │
 │  │         MongoDB Database              │          │
 │  │  Users • Rooms • Messages • Admins    │          │
-│  └──────────────────────────────────────┘           │
-│  ┌──────────────────────────────────────┐           │
-│  │        File Storage (uploads/)       │           │
-│  └──────────────────────────────────────┘           │
+│  └──────────────────────────────────────┘          │
+│  ┌──────────────────────────────────────┐          │
+│  │        File Storage (uploads/)        │          │
+│  └──────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -654,30 +654,6 @@ sequenceDiagram
    - Control por sala
    - Persistente durante sesión del servidor
 
-##  Detección de ZIP Bomb
-
-El proyecto implementa una protección contra **ZIP Bombs**, archivos comprimidos que aparentan ser pequeños pero que, al descomprimirse, pueden expandirse a tamaños extremadamente grandes y causar caídas del servidor.
-
-###  Implementación
-
-- Se instalaron las librerías requeridas para analizar ZIP y RAR sin extraerlos:
-  ```bash
-  npm install node-stream-zip node-unrar-js
-
-### Prueba de funcionamiento
-- Crear un archivo grande (100 MB):
-   ```bash
-fsutil file createnew dummy.txt 100000000
-
-Crear varias copias del archivo (10–20 veces).
-
-Comprimirlas todas en un archivo ZIP.
-
-Subir el ZIP al sistema.
-
-Si el archivo supera los límites de seguridad, el sistema lo detecta como ZIP Bomb y bloquea su carga de manera automática.
-
-
 ### Recomendaciones para Producción
 
 - [ ] Usar HTTPS (TLS/SSL)
@@ -688,6 +664,77 @@ Si el archivo supera los límites de seguridad, el sistema lo detecta como ZIP B
 - [ ] Backups regulares de MongoDB
 - [ ] Monitoreo de recursos del servidor
 - [ ] Variables de entorno en servidor seguro
+
+## Requisitos funcionales para software seguro (y estado de implementación)
+
+Abajo se listan los requisitos funcionales solicitados y, de forma puntual y objetiva, cómo los cumple (o no) el código del repositorio `Chat_Seguro`. Cada punto indica archivos clave y el estado actual: "Implementado", "Parcialmente implementado" o "No implementado".
+
+1) Autenticación de Administrador
+- Estado: Implementado (con 2FA opcional)
+- Qué hace el sistema: El administrador inicia sesión con usuario/contraseña y el backend soporta TOTP (2FA) opcional. La lógica principal está en `backend/src/controllers/authController.js` y el modelo en `backend/src/models/Admin.js` (campos `totpSecret`, `totpTempSecret`, `totpEnabled`).
+- Detalles técnicos:
+   - Login y emisión de JWT: `authController.generateAdminToken` / `generateToken` (uso de `jsonwebtoken`).
+   - 2FA TOTP: uso de `speakeasy` para generar/verificar secretos y `qrcode` para retornar `otpauth_url` y `qrDataUrl` durante setup (`authController.setupAdmin2FA`, `confirmAdmin2FA`).
+   - Protección de rutas admin: middleware `protectAdmin` en `backend/src/middleware/authMiddleware.js` que valida tokens y rechaza tokens temporales de 2FA.
+
+2) Creación de Salas
+- Estado: Implementado
+- Qué hace el sistema: Al crear una sala se genera un PIN de 4 dígitos y se almacena de forma segura; la sala tiene un ID en MongoDB y un tipo (`standard`/`multimedia`).
+- Archivos clave:
+   - Modelo de sala: `backend/src/models/Room.js` — campos `pinHash` (HMAC para búsquedas/únicidad), `pinEncrypted` (PIN encriptado y reversible, acceso via virtual `pin`).
+   - Generador de PIN: `backend/src/utils/pinGenerator.js` (PIN de 4 dígitos).
+   - Cripto para PINs: `backend/src/utils/pinCrypto.js` — `hmacPin`, `encryptPin`, `decryptPin` (HMAC-SHA256 + AES-GCM para encriptar el PIN). Variables seguras esperadas: `PIN_HMAC_SECRET`, `PIN_ENC_KEY`.
+   - Tipos de sala: `Room.type` (valores `standard` o `multimedia`).
+
+3) Acceso de Usuarios
+- Estado: Parcialmente implementado (acceso anónimo por nickname + control de sesión única e inactividad)
+- Qué hace el sistema:
+   - Login anónimo por nickname: `backend/src/controllers/authController.js` (`loginUser`) crea/recupera un `User` temporal y emite JWT.
+   - Acceso por PIN: la verificación del PIN utiliza `pinCrypto.hmacPin` y `pinEncrypted` en `Room` para comprobaciones (búsqueda por `pinHash` y validación por desencriptado cuando corresponde en control de rutas/creación de sesión — ver `server.js` y `routes/roomRoutes.js`).
+   - Sesión única y verificación de integridad: `backend/src/server.js` mantiene `userSessions` (una sesión por nickname/dispositivo), controla reconexiones con `reconnectCooldown`, y desconexión por inactividad (`INACTIVITY_TIMEOUT`).
+
+4) Funcionalidades en Sala
+- Estado: Implementado (mensajería en tiempo real, subida en salas multimedia con análisis de archivos)
+- Envío/recepción en tiempo real:
+   - Socket.IO en `backend/src/server.js` gestiona `sendMessage`, `joinRoom`, broadcasts y mantiene `activeUsers` por sala. Mensajes se guardan en `backend/src/models/Message.js`.
+   - Encriptación en reposo: utilidades en `backend/src/utils/encryption.js` (AES-256-CBC) para cifrar objetos/datos si se usan. Nota: cifrado end-to-end extremo a extremo con claves efímeras por cliente no está automáticamente implementado en el canal público; la app usa TLS/HTTPS sugerido para tránsito y AES-256 para cifrado en servidor.
+
+- Subidas y detección de esteganografía (salas `multimedia`):
+   - Uploads controlados por `multer` en `backend/src/config/multer.js` (límite `10 MB` y filtro de extensiones). Esto cumple el requisito de límite configurable (actual: 10MB). 
+   - Escaneo de esteganografía y validaciones profundas: `backend/src/controllers/fileController.js` invoca `backend/src/utils/steganographyDetector.js` que realiza:
+      - detecciones por firmas (magic numbers), análisis de entropía por ventanas (umbral en detector ≈ 7.5), inspección de chunks PNG, análisis LSB con `sharp` (si disponible), y búsqueda de archivos escondidos (ZIP/EXE/PDF embebidos).
+      - decisiones de bloqueo/registro según `UPLOAD_STRICT_MODE` (modo estricto bloquea en presencia de indicios fuertes) y persistencia de intentos bloqueados en `BlockedUpload`.
+   - Además hay detección de ZIP/RAR bombs: `backend/src/utils/archiveBombDetector.js` y uso en `fileController`.
+
+- Lista de usuarios y privacidad:
+   - `activeUsers` se publica via eventos `activeUsersUpdate`. Para privacidad, los logs ocultan nicknames (`backend/src/utils/logger.js` marca campos sensibles como `[OCULTO]`). Existe posibilidad de hash de nicknames para visibilidad reducida (el proyecto ya almacena nickname/username y oculta en logs).
+
+- Desconexión automática y limpieza segura:
+   - `server.js` implementa desconexión por inactividad, emisión de evento `inactivityDisconnect`, limpieza de `userSessions` y eliminación de usuarios de `activeUsers`.
+
+5) Gestión de concurrencia y seguridad
+- Estado: Parcialmente implementado (asíncronía via Node/Socket.IO, análisis pesado aislado y no bloquear ruta)
+- Qué se usa:
+   - Node.js + Socket.IO maneja conexiones concurrentes y broadcasts sin bloquear el event loop (I/O asíncrono). El servidor separa operaciones pesadas como análisis de estego en funciones que pueden ejecutarse sin bloquear la lógica principal — el detector usa `sharp` (si está presente) y lectura por buffers; `fileController` organiza flujo de trabajo en pasos (quickValidation → archiveBomb → stegoAnalysis).
+   - Para análisis costosos y evitar impacto de latencia se usa diseño no-blocante (promesas/await) y se sugiere ejecutar análisis en procesos/threads separados (Worker Threads / colas) en producción como mejora; en el código actual el análisis se ejecuta en el mismo proceso Node pero en funciones asíncronas. (Recomendación: externalizar análisis LSB/entropía a workers o microservicio).
+
+Seguridad criptográfica y no repudio
+- Confidencialidad:
+   - En reposo: `backend/src/utils/encryption.js` implementa AES-256-CBC para cifrar objetos/strings y utilidades para generar claves. Los PINs usan AES-GCM en `pinCrypto.encryptPin`.
+   - En tránsito: la configuración actual espera que la app se despliegue detrás de TLS (recomendado). Socket.IO y HTTP funcionan sobre HTTPS cuando se configura en producción.
+
+- Integridad y firma:
+   - Se usan HMAC (SHA-256) para `pinHash` (`pinCrypto.hmacPin`) y hashing de contraseñas con `bcryptjs`.
+   - No hay un esquema completo de firmas digitales para cada mensaje/archivo en el repositorio actual; para cumplir no-repudio se proveen logs inmutables parciales y se recomienda añadir firmas digitales (p. ej. claves asimétricas por admin/servicio) si se requiere garantía legal de no-repudio.
+
+- Disponibilidad y mitigación DDoS:
+   - Recomendado: rate limiting y WAF (no implementado explícitamente). El proyecto ya usa buenas prácticas (CORS, helmet) y diseño con Node/Socket.IO que ayuda con concurrencia, pero falta middleware explícito de rate-limiting (p. ej. `express-rate-limit`).
+
+Pruebas y cobertura
+- Herramientas usadas: `jest` y `supertest` para pruebas unitarias/integración (ver `backend/package.json`).
+- Estado actual: tests automatizados presentes (varios en `backend/__tests__`) y cobertura reportada ~67% (meta >70%). Tests relevantes: `pinGenerator.test.js`, `jwt.test.js`, `authRoutes.test.js`, `roomRoutes.test.js`.
+
+
 
 ---
 
