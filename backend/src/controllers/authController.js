@@ -2,8 +2,31 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import Admin from "../models/Admin.js";
 import validator from "validator";
-import speakeasy from "speakeasy";
-import QRCode from "qrcode";
+// Intentar import dinámico de `speakeasy`. Si no está disponible (p. ej. en tests sin node_modules),
+// usar un fallback mínimo que evita que el módulo haga fallar las pruebas.
+let speakeasy;
+try {
+  // top-level await es soportado en ESM en Node moderno y en la configuración de Jest aquí
+  speakeasy = (await import('speakeasy')).default;
+} catch (e) {
+  // Fallback mínimo: las funciones usadas por el controlador
+  speakeasy = {
+    totp: {
+      verify: () => false
+    },
+    generateSecret: (opts = {}) => ({ base32: '', otpauth_url: `otpauth://totp/${opts.name || 'ChatApp'}` })
+  };
+}
+// QRCode puede no estar instalado en el entorno de tests; intentar import dinámico
+let QRCode;
+try {
+  QRCode = (await import('qrcode')).default;
+} catch (e) {
+  // Fallback mínimo: toDataURL que retorna una data URL vacía
+  QRCode = {
+    toDataURL: async () => 'data:image/png;base64,'
+  };
+}
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: "7d" });

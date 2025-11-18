@@ -1,7 +1,12 @@
 // logger.js - Sistema de logging seguro sin datos sensibles
 
-// Configuración: cambiar a true para debugging (mostrará datos sensibles)
-const ENABLE_SENSITIVE_LOGS = false;
+// Configuración: por defecto false. Puede activarse mediante la función
+// `setSensitiveLogging` para facilitar pruebas.
+let ENABLE_SENSITIVE_LOGS = process.env.ENABLE_SENSITIVE_LOGS === 'true' || false;
+
+export const setSensitiveLogging = (v) => {
+  ENABLE_SENSITIVE_LOGS = !!v;
+};
 
 /**
  * Logger seguro que oculta datos sensibles en producción

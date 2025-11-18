@@ -354,9 +354,17 @@ const validateJPEG = (buffer) => {
     return { valid: false, reason: 'Firma JPEG inválida' };
   }
   
-  // JPEG debe terminar con EOI marker (FF D9)
-  const lastTwo = buffer.slice(-2);
-  if (lastTwo[0] !== 0xFF || lastTwo[1] !== 0xD9) {
+  // JPEG debe contener al menos un marcador EOI (FF D9).
+  // NO exigimos que esté al final del archivo, porque es común que se anexen datos
+  // legítimos o maliciosos después del EOI (en cuyo caso detectaremos trailingData).
+  let eoiFound = -1;
+  for (let i = buffer.length - 2; i >= 0; i--) {
+    if (buffer[i] === 0xFF && buffer[i + 1] === 0xD9) {
+      eoiFound = i;
+      break;
+    }
+  }
+  if (eoiFound === -1) {
     return { valid: false, reason: 'JPEG no tiene marcador de fin válido (EOI)' };
   }
   

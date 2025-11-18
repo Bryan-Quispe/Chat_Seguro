@@ -3,12 +3,15 @@ import crypto from "crypto";
 // Algoritmo de encriptación (AES-256-CBC)
 const ALGORITHM = "aes-256-cbc";
 
-// Clave de encriptación (debe estar en .env en producción)
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex");
+// Clave de encriptación por defecto (se generará si no existe en .env)
+const DEFAULT_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
 
-// Asegurar que la clave tenga 32 bytes
+// Asegurar que la clave tenga 32 bytes. Leer `process.env.ENCRYPTION_KEY` en tiempo
+// de ejecución permite que los tests modifiquen la variable de entorno y provoquen
+// rutas de error controladas.
 const getKey = () => {
-  const key = Buffer.from(ENCRYPTION_KEY.slice(0, 64), "hex");
+  const hex = (process.env.ENCRYPTION_KEY && process.env.ENCRYPTION_KEY.slice(0, 64)) || DEFAULT_ENCRYPTION_KEY;
+  const key = Buffer.from(hex, "hex");
   if (key.length !== 32) {
     throw new Error("La clave de encriptación debe tener 32 bytes (64 caracteres hex)");
   }
@@ -115,7 +118,10 @@ export const generateEncryptionKey = () => {
 
 // Generar clave si no existe
 if (!process.env.ENCRYPTION_KEY) {
-  console.warn("⚠️ ENCRYPTION_KEY no está en .env. Generando una nueva clave...");
-  console.log("📝 Agrega esto a tu .env:");
-  console.log(`ENCRYPTION_KEY=${generateEncryptionKey()}`);
+  // Generar clave en runtime. En tests silenciamos los mensajes para no contaminar la salida.
+  if (process.env.NODE_ENV !== 'test') {
+    console.warn("⚠️ ENCRYPTION_KEY no está en .env. Generando una nueva clave...");
+    console.log("📝 Agrega esto a tu .env:");
+    console.log(`ENCRYPTION_KEY=${generateEncryptionKey()}`);
+  }
 }
